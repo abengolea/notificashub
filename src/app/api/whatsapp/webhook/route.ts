@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase-admin";
 
-const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+// TODO: usar process.env.WHATSAPP_VERIFY_TOKEN cuando esté configurado en Firebase App Hosting
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? "notificas_webhook_2026";
 
 // Meta verifica el webhook con un GET
 export async function GET(req: NextRequest) {
