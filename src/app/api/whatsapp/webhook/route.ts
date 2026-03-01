@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/firebase-admin";
 
-// TODO: usar process.env.WHATSAPP_VERIFY_TOKEN cuando esté configurado en Firebase App Hosting
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? "notificas_webhook_2026";
 
-// Meta verifica el webhook con un GET
+// Meta verifica el webhook con un GET (sin Firebase Admin para que siempre responda)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const mode = searchParams.get("hub.mode");
@@ -23,6 +21,8 @@ export async function GET(req: NextRequest) {
 
 // Meta manda los eventos de estado con un POST
 export async function POST(req: NextRequest) {
+  const { db } = await import("@/lib/firebase-admin");
+
   try {
     const body = await req.json();
 
