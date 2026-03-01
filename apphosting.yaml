@@ -5,6 +5,7 @@ env:
   - variable: WHATSAPP_VERIFY_TOKEN
     value: notificas_webhook_2026
     availability:
+      - BUILD
       - RUNTIME
   - variable: PHONE_NUMBER_ID
     value: "693302653873170"
