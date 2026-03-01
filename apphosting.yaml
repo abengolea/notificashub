@@ -1,0 +1,12 @@
+runConfig:
+  concurrency: 10
+
+env:
+  - variable: WHATSAPP_VERIFY_TOKEN
+    value: notificas_webhook_2026
+    availability:
+      - RUNTIME
+  - variable: PHONE_NUMBER_ID
+    value: "693302653873170"
+    availability:
+      - RUNTIME
