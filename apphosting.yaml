@@ -1,3 +1,5 @@
+# Rama live: main (configurada en Firebase Console → App Hosting → Backend → Settings)
+
 runConfig:
   concurrency: 10
 
