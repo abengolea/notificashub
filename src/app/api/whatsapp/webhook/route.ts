@@ -56,32 +56,30 @@ export async function POST(req: NextRequest) {
       const heartlinkUrl = process.env.HEARTLINK_URL;
       const secret = process.env.INTERNAL_SECRET;
       console.log("[NotificasHub] Reenviando a HeartLink:", { from, messageId: message.id, type: message.type });
-      fetch(`${heartlinkUrl}/api/whatsapp/incoming`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-internal-token": secret,
-        },
-        body: JSON.stringify({
-          message,
-          from: String(from),
-          contactName: value?.contacts?.[0]?.profile?.name,
-          messageId: message.id,
-          timestamp: message.timestamp,
-        }),
-      })
-        .then(async (res) => {
-          const status = res.status;
-          if (!res.ok) {
-            const text = await res.text();
-            console.error("[NotificasHub] HeartLink error:", status, text);
-          } else {
-            console.log("[NotificasHub] Reenvío OK → HeartLink:", status);
-          }
-        })
-        .catch((err) => {
-          console.error("[NotificasHub] Error reenviando a HeartLink:", err);
+      try {
+        const res = await fetch(`${heartlinkUrl}/api/whatsapp/incoming`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-internal-token": secret,
+          },
+          body: JSON.stringify({
+            message,
+            from: String(from),
+            contactName: value?.contacts?.[0]?.profile?.name,
+            messageId: message.id,
+            timestamp: message.timestamp,
+          }),
         });
+        if (!res.ok) {
+          const text = await res.text();
+          console.error("[NotificasHub] HeartLink error:", res.status, text);
+        } else {
+          console.log("[NotificasHub] Reenvío OK → HeartLink:", res.status);
+        }
+      } catch (err) {
+        console.error("[NotificasHub] Error reenviando a HeartLink:", err);
+      }
     }
 
     if (!statuses || statuses.length === 0) {
