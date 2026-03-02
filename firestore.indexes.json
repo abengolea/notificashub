@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "whatsappMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "appId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

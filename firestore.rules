@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// Firestore Security Rules - NotificasHub
+//
+// IMPORTANTE: El Firebase Admin SDK (server-side) OMITE estas reglas.
+// - notificas-hub (Cloud Run) y gesAdmin escriben con credenciales de admin.
+// - No se necesita autenticación de usuario para backends con Admin SDK.
+//
+// Estas reglas solo aplican al SDK de cliente (web/mobile). Por defecto denegamos
+// acceso directo desde clientes para mayor seguridad.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // whatsappMessages: creada por gesAdmin, actualizada por webhook Meta.
+    // Admin SDK tiene acceso total; estas reglas no aplican a server-side.
+    match /whatsappMessages/{messageId} {
+      allow read, write: if false;  // Cliente: denegado. Admin: bypass.
+    }
+
+    // Cualquier otra ruta: denegar por defecto
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

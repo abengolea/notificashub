@@ -1,10 +1,11 @@
 import { getApps, initializeApp, cert, type App } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import path from "node:path";
 import { existsSync } from "node:fs";
 
 // Firebase Admin SDK - solo se ejecuta en el servidor (API routes, Server Components, etc.)
-// Local: usa archivo de credenciales. Producción (Cloud Run): usa Application Default Credentials
+// Local: usa archivo de credenciales. Producción (Cloud Run): Application Default Credentials
+// El Admin SDK omite las reglas de Firestore; gesAdmin y notificas-hub escriben sin restricciones.
 
 const PROJECT_ID = "studio-3864746689-59018";
 
@@ -27,4 +28,4 @@ function getAdminApp(): App {
 }
 
 export const adminApp = getAdminApp();
-export const db = getFirestore(adminApp);
+export const db: Firestore = getFirestore(adminApp);
