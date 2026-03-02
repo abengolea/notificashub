@@ -1,5 +1,5 @@
 // Debug: último webhook recibido (solo estructura)
-export let lastWebhook: {
+type WebhookInfo = {
   at: string;
   hasMessage: boolean;
   hasStatuses: boolean;
@@ -7,8 +7,15 @@ export let lastWebhook: {
   messageType?: string;
   bodyKeys?: string[];
   valueKeys?: string[];
-} | null = null;
+};
 
-export function setLastWebhook(info: typeof lastWebhook) {
+export let lastWebhook: WebhookInfo | null = null;
+// No sobrescribir: guardar el último que SÍ tenía mensaje (para no perderlo cuando lleguen statuses)
+export let lastMessageWebhook: WebhookInfo | null = null;
+
+export function setLastWebhook(info: WebhookInfo | null) {
   lastWebhook = info;
+  if (info?.hasMessage) {
+    lastMessageWebhook = info;
+  }
 }
