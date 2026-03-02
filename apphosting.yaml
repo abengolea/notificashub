@@ -13,3 +13,13 @@ env:
     value: "693302653873170"
     availability:
       - RUNTIME
+  # HeartLink - reenvío de mensajes entrantes
+  - variable: HEARTLINK_URL
+    value: https://heartlink--heartlink-f4ftq.us-central1.hosted.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: INTERNAL_SECRET
+    value: heartlink_internal_2026
+    availability:
+      - RUNTIME

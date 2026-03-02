@@ -32,6 +32,18 @@ export async function POST(req: NextRequest) {
     const message = value?.messages?.[0];
     const from = message?.from ?? value?.contacts?.[0]?.wa_id;
 
+    // Log cuando recibimos webhook de Meta
+    const hasMessages = !!(value?.messages?.length);
+    const hasStatuses = !!(value?.statuses?.length);
+    console.log("[NotificasHub] Webhook Meta recibido:", {
+      hasMessages,
+      hasStatuses,
+      messageCount: value?.messages?.length ?? 0,
+      from: from ?? message?.from ?? "?",
+      messageType: message?.type,
+      heartlinkConfig: !!(process.env.HEARTLINK_URL && process.env.INTERNAL_SECRET),
+    });
+
     // Debug: loggear si falta config (solo en producción para depurar)
     if (message && !from) {
       console.warn("[NotificasHub] Mensaje sin from:", { messageFrom: message?.from, contacts: value?.contacts });
@@ -59,10 +71,12 @@ export async function POST(req: NextRequest) {
         }),
       })
         .then(async (res) => {
+          const status = res.status;
           if (!res.ok) {
-            console.error("[NotificasHub] HeartLink respondió:", res.status, await res.text());
+            const text = await res.text();
+            console.error("[NotificasHub] HeartLink error:", status, text);
           } else {
-            console.log("[NotificasHub] HeartLink OK:", res.status);
+            console.log("[NotificasHub] Reenvío OK → HeartLink:", status);
           }
         })
         .catch((err) => {
