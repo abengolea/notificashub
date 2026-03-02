@@ -28,23 +28,46 @@ export async function POST(req: NextRequest) {
     const value = body?.entry?.[0]?.changes?.[0]?.value;
     const statuses = value?.statuses;
 
-    // Reenviar mensajes entrantes a HeartLink
+    // Reenviar mensajes entrantes a HeartLink (no bloqueante: Meta recibe 200 enseguida)
     const message = value?.messages?.[0];
-    const from = value?.contacts?.[0]?.wa_id;
+    const from = message?.from ?? value?.contacts?.[0]?.wa_id;
+
+    // Debug: loggear si falta config (solo en producción para depurar)
+    if (message && !from) {
+      console.warn("[NotificasHub] Mensaje sin from:", { messageFrom: message?.from, contacts: value?.contacts });
+    }
+    if (message && from && (!process.env.HEARTLINK_URL || !process.env.INTERNAL_SECRET)) {
+      console.warn("[NotificasHub] Falta HEARTLINK_URL o INTERNAL_SECRET, no se reenvía");
+    }
 
     if (message && from && process.env.HEARTLINK_URL && process.env.INTERNAL_SECRET) {
-      try {
-        await fetch(`${process.env.HEARTLINK_URL}/api/whatsapp/incoming`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-internal-token": process.env.INTERNAL_SECRET!,
-          },
-          body: JSON.stringify({ message, from }),
+      const heartlinkUrl = process.env.HEARTLINK_URL;
+      const secret = process.env.INTERNAL_SECRET;
+      console.log("[NotificasHub] Reenviando a HeartLink:", { from, messageId: message.id, type: message.type });
+      fetch(`${heartlinkUrl}/api/whatsapp/incoming`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-token": secret,
+        },
+        body: JSON.stringify({
+          message,
+          from: String(from),
+          contactName: value?.contacts?.[0]?.profile?.name,
+          messageId: message.id,
+          timestamp: message.timestamp,
+        }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            console.error("[NotificasHub] HeartLink respondió:", res.status, await res.text());
+          } else {
+            console.log("[NotificasHub] HeartLink OK:", res.status);
+          }
+        })
+        .catch((err) => {
+          console.error("[NotificasHub] Error reenviando a HeartLink:", err);
         });
-      } catch (err) {
-        console.error("[webhook] Error reenviando a HeartLink:", err);
-      }
     }
 
     if (!statuses || statuses.length === 0) {
