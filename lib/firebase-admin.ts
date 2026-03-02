@@ -19,8 +19,13 @@ function getAdminApp(): App {
     process.env.GOOGLE_APPLICATION_CREDENTIALS ??
     path.join(process.cwd(), `${PROJECT_ID}-firebase-adminsdk-fbsvc-5cdc673866.json`);
 
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS || existsSync(credentialsPath)) {
-    return initializeApp({ credential: cert(credentialsPath) });
+  // Intentar credenciales de archivo; si falla, usar Application Default Credentials (deploy)
+  try {
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || existsSync(credentialsPath)) {
+      return initializeApp({ credential: cert(credentialsPath) });
+    }
+  } catch {
+    // Archivo inválido o inaccesible durante build — usar ADC
   }
 
   // Cloud Run / Firebase App Hosting: Application Default Credentials
