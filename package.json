@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "register-user": "tsx scripts/register-user.ts",
+    "migrate-users": "tsx scripts/migrate-users-to-notificashub.ts"
   },
   "dependencies": {
     "firebase": "^12.10.0",
@@ -27,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.0.18"
   }
