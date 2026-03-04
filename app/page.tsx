@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getAuth, signInWithEmailAndPassword, signOut as firebaseSignOut } from "firebase/auth";
+import { app } from "@/lib/firebase";
 
 const STATUS_ICONS: Record<string, string> = {
   sent: "⏳",
@@ -34,6 +36,14 @@ type ApiResponse = {
   appIds: string[];
 };
 
+type AppStats = {
+  appId: string;
+  name: string;
+  today: { total: number; paid: number };
+  week: { total: number; paid: number };
+  month: { total: number; paid: number };
+};
+
 function formatFecha(iso: string | null): string {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -57,39 +67,40 @@ function formatHora(iso: string | null | undefined): string {
   });
 }
 
-const STORAGE_KEY = "dashboard-pwd";
+const STORAGE_KEY = "dashboard-token";
 
 export default function Home() {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [storedPassword, setStoredPassword] = useState<string | null>(null);
+  const [storedToken, setStoredToken] = useState<string | null>(null);
 
   useEffect(() => {
-    setStoredPassword(sessionStorage.getItem(STORAGE_KEY));
+    setStoredToken(sessionStorage.getItem(STORAGE_KEY));
   }, []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [appStats, setAppStats] = useState<AppStats[]>([]);
   const [appIds, setAppIds] = useState<string[]>([]);
   const [filterAppId, setFilterAppId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const pwd = storedPassword || password;
-    if (!pwd) return;
+    const token = storedToken;
+    if (!token) return;
 
     setLoading(true);
     setError(null);
     try {
+      const headers: HeadersInit = { Authorization: `Bearer ${token}` };
       const params = new URLSearchParams();
       if (filterAppId) params.set("appId", filterAppId);
-      const res = await fetch(`/api/messages/list?${params}`, {
-        headers: { "x-dashboard-password": pwd },
-      });
+      const res = await fetch(`/api/messages/list?${params}`, { headers });
 
       if (res.status === 401) {
         sessionStorage.removeItem(STORAGE_KEY);
-        setStoredPassword(null);
-        setError("Contraseña incorrecta");
+        setStoredToken(null);
+        setError("Sesión expirada. Volvé a iniciar sesión.");
         return;
       }
 
@@ -103,42 +114,67 @@ export default function Home() {
       setMessages(data.messages);
       setStats(data.stats);
       setAppIds(data.appIds ?? []);
+
+      const statsRes = await fetch("/api/dashboard/stats-by-app", { headers });
+      if (statsRes.ok) {
+        const { apps } = await statsRes.json();
+        setAppStats(apps ?? []);
+      }
     } catch (e) {
       setError("Error de conexión");
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [storedPassword, password, filterAppId]);
+  }, [storedToken, filterAppId]);
 
   useEffect(() => {
-    if (!storedPassword) return;
+    if (!storedToken) return;
     fetchData();
-  }, [storedPassword, filterAppId]);
+  }, [storedToken, filterAppId]);
 
   useEffect(() => {
-    if (!storedPassword) return;
+    if (!storedToken) return;
     const id = setInterval(fetchData, 10000);
     return () => clearInterval(id);
-  }, [storedPassword, fetchData]);
+  }, [storedToken, fetchData]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim()) return;
-    sessionStorage.setItem(STORAGE_KEY, password);
-    setStoredPassword(password);
+    if (!email.trim() || !password.trim()) return;
     setError(null);
+    setLoading(true);
+    try {
+      const auth = getAuth(app);
+      const userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const token = await userCred.user.getIdToken();
+      sessionStorage.setItem(STORAGE_KEY, token);
+      setStoredToken(token);
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      setError(e.code === "auth/invalid-credential" ? "Email o contraseña incorrectos" : "Error al iniciar sesión");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth(app);
+      await firebaseSignOut(auth);
+    } catch {
+      // ignore
+    }
     sessionStorage.removeItem(STORAGE_KEY);
-    setStoredPassword(null);
+    setStoredToken(null);
+    setEmail("");
     setPassword("");
     setMessages([]);
     setStats(null);
+    setAppStats([]);
   };
 
-  if (!storedPassword) {
+  if (!storedToken) {
     return (
       <div className="min-h-screen bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center p-4">
         <form
@@ -149,6 +185,17 @@ export default function Home() {
             Dashboard WhatsApp
           </h1>
           <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+            Email
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-4 py-2 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 focus:border-transparent mb-4"
+            placeholder="admin@ejemplo.com"
+            autoComplete="email"
+          />
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
             Contraseña
           </label>
           <input
@@ -156,17 +203,18 @@ export default function Home() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-4 py-2 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-            placeholder="Contraseña del dashboard"
-            autoFocus
+            placeholder="Contraseña"
+            autoComplete="current-password"
           />
           {error && (
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
           )}
           <button
             type="submit"
-            className="mt-6 w-full rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 transition-colors"
+            disabled={loading}
+            className="mt-6 w-full rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
           >
-            Entrar
+            {loading ? "Entrando..." : "Entrar"}
           </button>
         </form>
       </div>
@@ -187,6 +235,64 @@ export default function Home() {
             Cerrar sesión
           </button>
         </header>
+
+        {appStats.length > 0 && (
+          <section className="mb-8">
+            <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200 mb-1">
+              Mensajes pagos por app
+            </h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+              (paid / total) — Click para filtrar la tabla
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {appStats.map((app) => (
+                <button
+                  key={app.appId}
+                  type="button"
+                  onClick={() => setFilterAppId((prev) => (prev === app.appId ? "" : app.appId))}
+                  className={`text-left rounded-xl bg-white dark:bg-zinc-800 border p-5 transition-colors ${
+                    filterAppId === app.appId
+                      ? "border-emerald-500 ring-2 ring-emerald-500/30"
+                      : "border-zinc-200 dark:border-zinc-700 hover:border-emerald-400/50"
+                  }`}
+                >
+                  <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
+                    {app.name}
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mb-3">
+                    {app.appId}
+                  </p>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600 dark:text-zinc-400">Hoy</span>
+                      <span>
+                        <strong className="text-amber-600 dark:text-amber-400">{app.today.paid}</strong>
+                        <span className="text-zinc-400 mx-1">/</span>
+                        {app.today.total}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600 dark:text-zinc-400">Semana</span>
+                      <span>
+                        <strong className="text-amber-600 dark:text-amber-400">{app.week.paid}</strong>
+                        <span className="text-zinc-400 mx-1">/</span>
+                        {app.week.total}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-600 dark:text-zinc-400">Mes</span>
+                      <span>
+                        <strong className="text-amber-600 dark:text-amber-400">{app.month.paid}</strong>
+                        <span className="text-zinc-400 mx-1">/</span>
+                        {app.month.total}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

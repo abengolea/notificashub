@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "register-user": "tsx scripts/register-user.ts",
-    "migrate-users": "tsx scripts/migrate-users-to-notificashub.ts"
+    "create-admin-user": "tsx scripts/create-admin-user.ts",
+    "migrate-users": "tsx scripts/migrate-users-to-notificashub.ts",
+    "update-whatsapp-profile": "tsx scripts/update-whatsapp-profile.ts"
   },
   "dependencies": {
     "firebase": "^12.10.0",
@@ -21,6 +23,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "dotenv": "^16.4.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase-admin";
+import { validateDashboardAccess } from "@/lib/auth-admin";
 import type { Timestamp } from "firebase-admin/firestore";
-
-const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
 function toIsoString(val: Timestamp | Date | unknown): string | null {
   if (!val) return null;
@@ -23,8 +22,10 @@ function isToday(iso: string | null): boolean {
 }
 
 export async function GET(req: NextRequest) {
-  const password = req.headers.get("x-dashboard-password");
-  if (!DASHBOARD_PASSWORD || password !== DASHBOARD_PASSWORD) {
+  const authHeader = req.headers.get("authorization");
+  const passwordHeader = req.headers.get("x-dashboard-password");
+  const valid = await validateDashboardAccess(authHeader, passwordHeader);
+  if (!valid) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

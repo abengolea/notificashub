@@ -10,9 +10,14 @@ export interface WebhookHandlerResult {
   statusesHandled: boolean;
 }
 
-export function extractStatuses(
-  body: unknown
-): Array<{ id: string; status: string; timestamp: string }> {
+export interface StatusUpdate {
+  id: string;
+  status: string;
+  timestamp: string;
+  pricingCategory?: string;
+}
+
+export function extractStatuses(body: unknown): StatusUpdate[] {
   if (!body || typeof body !== "object") return [];
   const obj = body as Record<string, unknown>;
   const entry = Array.isArray(obj.entry) ? obj.entry[0] : undefined;
@@ -22,7 +27,14 @@ export function extractStatuses(
   if (!change || typeof change !== "object") return [];
   const value = (change as { value?: { statuses?: unknown[] } }).value;
   const statuses = value?.statuses ?? [];
-  return statuses as Array<{ id: string; status: string; timestamp: string }>;
+  return (statuses as Array<{ id: string; status: string; timestamp: string; pricing?: { category?: string } }>).map(
+    (s) => ({
+      id: s.id,
+      status: s.status,
+      timestamp: s.timestamp,
+      pricingCategory: s.pricing?.category,
+    })
+  );
 }
 
 export async function handleIncomingWebhook(

@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
       if (newStatus === "delivered") update.deliveredAt = new Date(Number(timestamp) * 1000);
       if (newStatus === "read") update.readAt = new Date(Number(timestamp) * 1000);
       if (newStatus === "failed") update.failedAt = new Date(Number(timestamp) * 1000);
+      if (s.pricingCategory) update.pricingCategory = s.pricingCategory;
 
       await ref.update(update);
       console.log(`[webhook] Mensaje ${messageId} → ${newStatus}`);
