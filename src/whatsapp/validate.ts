@@ -32,15 +32,31 @@ const metaInteractiveReplySchema = z.object({
     .optional(),
 });
 
-const metaMessageSchema = z.object({
-  id: z.string(),
-  from: z.string(),
-  timestamp: z.string(),
-  type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button"]),
-  text: metaTextSchema.optional(),
-  interactive: metaInteractiveReplySchema.optional(),
-  referral: metaReferralSchema.optional(),
-});
+// Objetos de media de Meta: video, image, audio, document (HeartLink necesita message.video.id, etc.)
+const metaMediaSchema = z
+  .object({
+    id: z.string(),
+    mime_type: z.string().optional(),
+    sha256: z.string().optional(),
+  })
+  .passthrough();
+
+const metaMessageSchema = z
+  .object({
+    id: z.string(),
+    from: z.string(),
+    timestamp: z.string(),
+    type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button"]),
+    text: metaTextSchema.optional(),
+    interactive: metaInteractiveReplySchema.optional(),
+    referral: metaReferralSchema.optional(),
+    video: metaMediaSchema.optional(),
+    image: metaMediaSchema.optional(),
+    audio: metaMediaSchema.optional(),
+    document: metaMediaSchema.optional(),
+    contacts: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
 
 const metaValueSchema = z.object({
   messages: z.array(metaMessageSchema).optional(),

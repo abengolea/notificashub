@@ -119,6 +119,36 @@ describe("extractIncomingMessages", () => {
     expect(extractIncomingMessages(null)).toEqual([]);
     expect(extractIncomingMessages({})).toEqual([]);
   });
+  it("preserves video object for HeartLink (message.video.id)", () => {
+    const body = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.xxx",
+                    from: "5493364645357",
+                    timestamp: "1772659306",
+                    type: "video",
+                    video: { id: "MEDIA_ID_AQUI", mime_type: "video/mp4" },
+                  },
+                ],
+                contacts: [{ wa_id: "5493364645357", profile: { name: "Usuario" } }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const result = extractIncomingMessages(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].message.type).toBe("video");
+    expect(result[0].message.video).toBeDefined();
+    expect(result[0].message.video?.id).toBe("MEDIA_ID_AQUI");
+    expect(result[0].message.video?.mime_type).toBe("video/mp4");
+  });
 });
 
 describe("toIncomingMessage", () => {
