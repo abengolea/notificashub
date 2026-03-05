@@ -46,7 +46,7 @@ const metaMessageSchema = z
     id: z.string(),
     from: z.string(),
     timestamp: z.string(),
-    type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button"]),
+    type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button", "contacts"]),
     text: metaTextSchema.optional(),
     interactive: metaInteractiveReplySchema.optional(),
     referral: metaReferralSchema.optional(),

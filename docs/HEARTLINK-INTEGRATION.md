@@ -62,6 +62,22 @@ if (phone) {
 | NOTIFICASHUB_URL   | `https://notificashub--studio-3864746689-59018.us-east4.hosted.app` |
 | INTERNAL_SECRET    | `heartlink_internal_2026`                                            |
 
+## Reenvío de mensajes (webhook incoming)
+
+Cuando NotificasHub recibe un mensaje de Meta y lo reenvía a HeartLink (`/api/whatsapp/incoming`), el payload incluye el **objeto `message` completo** sin filtrar:
+
+```json
+{
+  "message": { "id", "from", "timestamp", "type", "text"|"contacts"|"video"|..., ... },
+  "from": "5491112345678",
+  "contactName": "Nombre del usuario",
+  "messageId": "wamid.xxx",
+  "timestamp": "1234567890"
+}
+```
+
+**Importante:** Para mensajes de tipo `contacts` (contacto compartido, ej. médico solicitante), el objeto `message` incluye `message.contacts` con la estructura que envía Meta (phones, wa_id, vcard, etc.). HeartLink debe usar ese array para extraer el teléfono del médico. No se debe depender solo del teléfono guardado en BD.
+
 ## Desregistro (opcional)
 
 Si eliminás un usuario de HeartLink y querés que deje de recibir enrutado:

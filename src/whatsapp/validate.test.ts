@@ -119,6 +119,46 @@ describe("extractIncomingMessages", () => {
     expect(extractIncomingMessages(null)).toEqual([]);
     expect(extractIncomingMessages({})).toEqual([]);
   });
+  it("preserves contacts object for HeartLink (contacto compartido, médico solicitante)", () => {
+    const body = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.cont123",
+                    from: "5491112345678",
+                    timestamp: "1234567890",
+                    type: "contacts",
+                    contacts: [
+                      {
+                        name: { formatted_name: "Dr. Juan Pérez", first_name: "Juan" },
+                        wa_id: "5491155667788",
+                        phones: [{ wa_id: "5491155667788", phone: "+5491155667788", type: "CELL" }],
+                      },
+                    ],
+                  },
+                ],
+                contacts: [{ wa_id: "5491112345678", profile: { name: "Paciente" } }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const result = extractIncomingMessages(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].message.type).toBe("contacts");
+    expect(result[0].message.contacts).toBeDefined();
+    expect(result[0].message.contacts).toHaveLength(1);
+    expect(result[0].message.contacts?.[0]).toMatchObject({
+      wa_id: "5491155667788",
+      name: { formatted_name: "Dr. Juan Pérez" },
+    });
+    expect(result[0].message.contacts?.[0].phones).toHaveLength(1);
+  });
   it("preserves video object for HeartLink (message.video.id)", () => {
     const body = {
       entry: [

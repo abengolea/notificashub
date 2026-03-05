@@ -75,6 +75,16 @@ export async function processInbound(
 
       if (resolveResult.action === "route") {
         const tenant = await getTenantInfo(db, resolveResult.tenantId);
+        // Log para depuración: contacto compartido (médico solicitante)
+        const hasContacts = !!(message as { contacts?: unknown[] }).contacts?.length ||
+          !!(message as { contact?: unknown }).contact;
+        if (hasContacts) {
+          console.log("[NotificasHub] Reenviando mensaje con contacto compartido:", {
+            messageId,
+            to: tenant?.webhookUrl ?? "heartlink",
+            contactsCount: (message as { contacts?: unknown[] }).contacts?.length ?? 0,
+          });
+        }
         if (tenant?.webhookUrl && tenant.internalSecret) {
           try {
             const res = await fetch(tenant.webhookUrl, {
