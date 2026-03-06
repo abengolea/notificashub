@@ -9,8 +9,15 @@ env:
     availability:
       - BUILD
       - RUNTIME
-  - variable: PHONE_NUMBER_ID
+  # WhatsApp Cloud API: requerido para enviar mensajes (ask_choice, respuestas)
+  - variable: WHATSAPP_PHONE_NUMBER_ID
     value: "693302653873170"
+    availability:
+      - RUNTIME
+  # Token de Meta: crear con firebase apphosting:secrets:set whatsapp-access-token
+  # y grant: firebase apphosting:secrets:grantaccess WHATSAPP_ACCESS_TOKEN --backend <nombre>
+  - variable: WHATSAPP_ACCESS_TOKEN
+    secret: whatsapp-access-token
     availability:
       - RUNTIME
   # HeartLink - reenvío de mensajes entrantes
