@@ -86,15 +86,21 @@ export async function resolveTenantForIncomingMessage(
 
     const session = await getSession(db, sessionKey);
     if (session?.activeTenantId && tenantIds.includes(session.activeTenantId)) {
+      console.log("[NotificasHub] Route via session:", session.activeTenantId);
       return { action: "route", tenantId: session.activeTenantId };
     }
 
     const lastTenant = await getLastTenant(db, phone);
     if (lastTenant?.tenantId && tenantIds.includes(lastTenant.tenantId)) {
       const storedIds = lastTenant.tenantIdsAtChoice;
-      const isRecent = Date.now() - lastTenant.updatedAt.getTime() <= ACTIVITY_WINDOW_MS;
+      const ageMs = Date.now() - lastTenant.updatedAt.getTime();
+      const isRecent = ageMs <= ACTIVITY_WINDOW_MS;
       if (storedIds && arraysEqualUnordered(storedIds, tenantIds) && isRecent) {
+        console.log("[NotificasHub] Route via lastTenant:", lastTenant.tenantId, "ageMin:", Math.round(ageMs / 60000));
         return { action: "route", tenantId: lastTenant.tenantId };
+      }
+      if (!isRecent) {
+        console.log("[NotificasHub] lastTenant expirado (inactividad >5min), mostrando lista. ageMin:", Math.round(ageMs / 60000));
       }
     }
 
