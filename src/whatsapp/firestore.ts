@@ -2,6 +2,7 @@
  * Persistencia Firestore para WhatsApp Router multi-tenant
  */
 import type { Firestore } from "firebase-admin/firestore";
+import { FieldPath } from "firebase-admin/firestore";
 import type { TenantOption, UserMembershipDoc } from "./types";
 
 const TENANTS = "tenants";
@@ -68,6 +69,8 @@ export async function getSession(
   if (!snap.exists) return null;
   const d = snap.data();
   if (!d) return null;
+  const expiresAt = toDate(d.expiresAt);
+  if (expiresAt < new Date()) return null; // Sesión expirada
   return {
     phone: d.phone,
     conversationId: d.conversationId,
@@ -75,7 +78,7 @@ export async function getSession(
     state: d.state,
     createdAt: toDate(d.createdAt),
     updatedAt: toDate(d.updatedAt),
-    expiresAt: toDate(d.expiresAt),
+    expiresAt,
   };
 }
 
@@ -96,14 +99,18 @@ export async function setSession(
   data: Omit<WaSessionData, "createdAt" | "updatedAt">
 ): Promise<void> {
   const now = new Date();
-  await db.collection(WA_SESSIONS).doc(sessionKey).set(
-    {
-      ...data,
-      createdAt: now,
-      updatedAt: now,
-    },
-    { merge: true }
-  );
+  const payload: Record<string, unknown> = {
+    phone: data.phone,
+    activeTenantId: data.activeTenantId,
+    state: data.state,
+    expiresAt: data.expiresAt,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (data.conversationId != null) {
+    payload.conversationId = data.conversationId;
+  }
+  await db.collection(WA_SESSIONS).doc(sessionKey).set(payload, { merge: true });
 }
 
 interface WaPendingChoiceData {
@@ -176,10 +183,17 @@ export async function deletePendingChoice(
 
 const LAST_TENANT_DAYS = 30;
 
+export interface LastTenantRecord {
+  tenantId: string;
+  updatedAt: Date;
+  /** Solo presente si fue elegido explícitamente en contexto multi-tenant */
+  tenantIdsAtChoice?: string[];
+}
+
 export async function getLastTenant(
   db: Firestore,
   phone: string
-): Promise<{ tenantId: string; updatedAt: Date } | null> {
+): Promise<LastTenantRecord | null> {
   const key = sanitizePhone(phone);
   const snap = await db.collection(WA_LAST_TENANT).doc(key).get();
   if (!snap.exists) return null;
@@ -189,19 +203,50 @@ export async function getLastTenant(
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - LAST_TENANT_DAYS);
   if (updatedAt < cutoff) return null;
-  return { tenantId: d.tenantId as string, updatedAt };
+  return {
+    tenantId: d.tenantId as string,
+    updatedAt,
+    tenantIdsAtChoice: d.tenantIdsAtChoice as string[] | undefined,
+  };
 }
 
+/**
+ * Guarda el último tenant elegido. Para multi-tenant, incluir tenantIdsAtChoice
+ * para validar que la membresía no haya cambiado al leer.
+ */
 export async function setLastTenant(
   db: Firestore,
   phone: string,
-  tenantId: string
+  tenantId: string,
+  tenantIdsAtChoice?: string[]
 ): Promise<void> {
   const key = sanitizePhone(phone);
   const now = new Date();
-  await db.collection(WA_LAST_TENANT).doc(key).set(
-    { tenantId, updatedAt: now },
-    { merge: true }
-  );
+  const data: Record<string, unknown> = { tenantId, updatedAt: now };
+  if (tenantIdsAtChoice?.length) {
+    data.tenantIdsAtChoice = tenantIdsAtChoice;
+  }
+  await db.collection(WA_LAST_TENANT).doc(key).set(data, { merge: true });
+}
+
+/** Borra wa_last_tenant para un teléfono (ej. al agregar nuevo tenant) */
+export async function clearLastTenant(db: Firestore, phone: string): Promise<void> {
+  const key = sanitizePhone(phone);
+  await db.collection(WA_LAST_TENANT).doc(key).delete();
+}
+
+/** Borra todas las wa_sessions de un teléfono (por prefijo phone_) */
+export async function clearSessionsForPhone(db: Firestore, phone: string): Promise<void> {
+  const prefix = sanitizePhone(phone) + "_";
+  const snap = await db
+    .collection(WA_SESSIONS)
+    .where(FieldPath.documentId(), ">=", prefix)
+    .where(FieldPath.documentId(), "<=", prefix + "\uf8ff")
+    .get();
+  const batch = db.batch();
+  for (const doc of snap.docs) {
+    batch.delete(doc.ref);
+  }
+  if (!snap.empty) await batch.commit();
 }
 
