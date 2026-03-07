@@ -75,6 +75,7 @@ export async function processInbound(
 
       if (resolveResult.action === "route") {
         const tenant = await getTenantInfo(db, resolveResult.tenantId);
+        const tenantName = tenant?.name ?? resolveResult.tenantId;
         // Log para depuración: contacto compartido (médico solicitante)
         const hasContacts = !!(message as { contacts?: unknown[] }).contacts?.length ||
           !!(message as { contact?: unknown }).contact;
@@ -85,6 +86,7 @@ export async function processInbound(
             contactsCount: (message as { contacts?: unknown[] }).contacts?.length ?? 0,
           });
         }
+        let forwarded = false;
         if (tenant?.webhookUrl && tenant.internalSecret) {
           try {
             const res = await fetch(tenant.webhookUrl, {
@@ -104,6 +106,8 @@ export async function processInbound(
             if (!res.ok) {
               const text = await res.text();
               result.errors.push(`tenant ${resolveResult.tenantId}: ${res.status} ${text}`);
+            } else {
+              forwarded = true;
             }
           } catch (err) {
             result.errors.push(
@@ -133,10 +137,23 @@ export async function processInbound(
             if (!res.ok) {
               const text = await res.text();
               result.errors.push(`heartlink: ${res.status} ${text}`);
+            } else {
+              forwarded = true;
             }
           } catch (err) {
             result.errors.push(`heartlink: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }
+        // Siempre enviar confirmación al usuario para que no quede el chat muerto
+        try {
+          await sendText(
+            from,
+            `Te conectamos con ${tenantName}. Escribí tu consulta y te responderemos a la brevedad.`
+          );
+        } catch (err) {
+          result.errors.push(
+            `send confirmación: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
         result.processed++;
       }

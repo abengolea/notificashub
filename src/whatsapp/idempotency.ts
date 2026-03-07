@@ -34,10 +34,13 @@ export async function claimInboundMessage(
       return { claimed: false, existing: true };
     }
 
+    // Firestore no acepta undefined; sanitizar payload (Meta puede enviar conversationId: undefined)
+    const sanitizedPayload = JSON.parse(JSON.stringify(data.payload)) as Record<string, unknown>;
+
     tx.set(ref, {
       direction: "in",
       phone: data.phone,
-      payload: data.payload,
+      payload: sanitizedPayload,
       createdAt: new Date(),
       ...(data.pricingCategory && { pricingCategory: data.pricingCategory }),
     });
