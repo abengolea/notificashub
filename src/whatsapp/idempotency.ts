@@ -36,26 +36,26 @@ export async function claimInboundMessage(
 
     // Firestore no acepta undefined. Guardar solo campos esenciales; JSON.parse/stringify elimina undefined.
     const p = data.payload;
-    const payload: Record<string, unknown> = JSON.parse(
-      JSON.stringify({
-        id: p.id,
-        from: p.from,
-        timestamp: p.timestamp,
-        type: p.type,
-        ...(p.text && { text: p.text }),
-        ...(p.interactive && { interactive: p.interactive }),
-        ...(p.context && { context: p.context }),
-        ...(p.referral && { referral: p.referral }),
-      })
-    );
+    const obj: Record<string, unknown> = {
+      id: p.id,
+      from: p.from,
+      timestamp: p.timestamp,
+      type: p.type,
+    };
+    if (p.text) obj.text = p.text;
+    if (p.interactive) obj.interactive = p.interactive;
+    if (p.context) obj.context = p.context;
+    if (p.referral) obj.referral = p.referral;
+    const payload = JSON.parse(JSON.stringify(obj)) as Record<string, unknown>;
 
-    tx.set(ref, {
+    const doc: Record<string, unknown> = {
       direction: "in",
       phone: data.phone,
       payload,
       createdAt: new Date(),
-      ...(data.pricingCategory && { pricingCategory: data.pricingCategory }),
-    });
+    };
+    if (data.pricingCategory) doc.pricingCategory = data.pricingCategory;
+    tx.set(ref, doc);
 
     return { claimed: true, existing: false };
   });
