@@ -33,4 +33,7 @@ function getAdminApp(): App {
 }
 
 export const adminApp = getAdminApp();
-export const db: Firestore = getFirestore(adminApp);
+const firestore = getFirestore(adminApp);
+// Meta puede enviar conversationId: undefined en payloads; Firestore lo rechaza por defecto
+firestore.settings({ ignoreUndefinedProperties: true });
+export const db: Firestore = firestore;

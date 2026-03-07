@@ -34,13 +34,25 @@ export async function claimInboundMessage(
       return { claimed: false, existing: true };
     }
 
-    // Firestore no acepta undefined; sanitizar payload (Meta puede enviar conversationId: undefined)
-    const sanitizedPayload = JSON.parse(JSON.stringify(data.payload)) as Record<string, unknown>;
+    // Firestore no acepta undefined. Guardar solo campos esenciales; JSON.parse/stringify elimina undefined.
+    const p = data.payload;
+    const payload: Record<string, unknown> = JSON.parse(
+      JSON.stringify({
+        id: p.id,
+        from: p.from,
+        timestamp: p.timestamp,
+        type: p.type,
+        ...(p.text && { text: p.text }),
+        ...(p.interactive && { interactive: p.interactive }),
+        ...(p.context && { context: p.context }),
+        ...(p.referral && { referral: p.referral }),
+      })
+    );
 
     tx.set(ref, {
       direction: "in",
       phone: data.phone,
-      payload: sanitizedPayload,
+      payload,
       createdAt: new Date(),
       ...(data.pricingCategory && { pricingCategory: data.pricingCategory }),
     });
