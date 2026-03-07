@@ -30,3 +30,5 @@ env:
     value: heartlink_internal_2026
     availability:
       - RUNTIME
+  - variable: NOTIFICASHUB_URL
+    secret: NOTIFICASHUB_URL

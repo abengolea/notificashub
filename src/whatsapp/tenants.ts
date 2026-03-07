@@ -24,7 +24,8 @@ export const HARDCODED_TENANTS: Record<
   },
   nautica: {
     name: "Náutica",
-    referralTokens: ["NAUTICA", "NAUTICA"],
+    referralTokens: ["NAUTICA", "YAGURON"],
+    internalSecret: process.env.NAUTICA_INTERNAL_SECRET,
   },
 };
 

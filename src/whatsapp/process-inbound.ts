@@ -101,6 +101,7 @@ export async function processInbound(
                 contactName,
                 messageId,
                 timestamp: message.timestamp,
+                tenantId: resolveResult.tenantId,
               }),
             });
             if (!res.ok) {
@@ -132,6 +133,7 @@ export async function processInbound(
                 contactName,
                 messageId,
                 timestamp: message.timestamp,
+                tenantId: "heartlink",
               }),
             });
             if (!res.ok) {
@@ -144,7 +146,23 @@ export async function processInbound(
             result.errors.push(`heartlink: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        // No enviamos mensaje de confirmación: el tenant (HeartLink, Náutica) responde con su propio flujo.
+        // Si no pudimos reenviar (sin webhook o falló), enviamos fallback para que el usuario no quede sin respuesta
+        if (!forwarded) {
+          console.warn(
+            `[NotificasHub] No se pudo reenviar a ${resolveResult.tenantId}: ` +
+              (tenant?.webhookUrl ? "webhook falló" : "webhookUrl no configurado")
+          );
+          try {
+            await sendText(
+              from,
+              `Te conectamos con ${tenantName}. Si no recibís respuesta en unos minutos, escribinos de nuevo.`
+            );
+          } catch (sendErr) {
+            result.errors.push(
+              `fallback send: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`
+            );
+          }
+        }
         result.processed++;
       }
     } catch (err) {

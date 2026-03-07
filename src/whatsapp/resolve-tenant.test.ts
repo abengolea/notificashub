@@ -5,6 +5,7 @@ vi.mock("./firestore", () => ({
   getMemberships: vi.fn(),
   getSession: vi.fn(),
   setSession: vi.fn(),
+  deleteSession: vi.fn(),
   getPendingChoice: vi.fn(),
   setPendingChoice: vi.fn(),
   incrementPendingAttempts: vi.fn(),
@@ -177,6 +178,144 @@ describe("resolveTenantForIncomingMessage", () => {
     expect(result.action).toBe("route");
     if (result.action === "route") {
       expect(result.tenantId).toBe("heartlink");
+    }
+  });
+
+  it("returns ask_choice for multi-tenant when lastTenant has no tenantIdsAtChoice (legacy)", async () => {
+    vi.mocked(getMemberships).mockResolvedValue({
+      phone: "5493364645357",
+      tenantIds: ["heartlink-tenant-id", "WZAf1Mw08Uq047wneIxI"],
+      updatedAt: {},
+    });
+    vi.mocked(getSession).mockResolvedValue(null);
+    vi.mocked(getLastTenant).mockResolvedValue({
+      tenantId: "heartlink-tenant-id",
+      updatedAt: new Date(),
+      tenantIdsAtChoice: undefined,
+    });
+    vi.mocked(getPendingChoice).mockResolvedValue(null);
+
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5493364645357",
+      { id: "1", from: "5493364645357", timestamp: "123", type: "text" }
+    );
+
+    expect(result.action).toBe("ask_choice");
+    if (result.action === "ask_choice") {
+      expect(result.options).toHaveLength(2);
+    }
+  });
+
+  it("returns route when multi-tenant has valid lastTenant with tenantIdsAtChoice", async () => {
+    vi.mocked(getMemberships).mockResolvedValue({
+      phone: "5491112345678",
+      tenantIds: ["heartlink", "nautica"],
+      updatedAt: {},
+    });
+    vi.mocked(getSession).mockResolvedValue(null);
+    vi.mocked(getLastTenant).mockResolvedValue({
+      tenantId: "heartlink",
+      updatedAt: new Date(),
+      tenantIdsAtChoice: ["heartlink", "nautica"],
+    });
+    vi.mocked(getPendingChoice).mockResolvedValue(null);
+
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5491112345678",
+      { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
+    );
+
+    expect(result.action).toBe("route");
+    if (result.action === "route") expect(result.tenantId).toBe("heartlink");
+  });
+
+  it("returns ask_choice when session expired (>5min inactivity)", async () => {
+    const fiveMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+    vi.mocked(getMemberships).mockResolvedValue({
+      phone: "5491112345678",
+      tenantIds: ["heartlink", "nautica"],
+      updatedAt: {},
+    });
+    vi.mocked(getSession).mockResolvedValue({
+      phone: "5491112345678",
+      activeTenantId: "heartlink",
+      state: "active",
+      createdAt: fiveMinutesAgo,
+      updatedAt: fiveMinutesAgo,
+      expiresAt: new Date(fiveMinutesAgo.getTime() + 5 * 60 * 1000),
+    });
+    vi.mocked(getLastTenant).mockResolvedValue(null);
+    vi.mocked(getPendingChoice).mockResolvedValue(null);
+
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5491112345678",
+      { id: "1", from: "5491112345678", timestamp: String(Math.floor(Date.now() / 1000)), type: "text" }
+    );
+
+    expect(result.action).toBe("ask_choice");
+    if (result.action === "ask_choice") {
+      expect(result.options).toHaveLength(2);
+    }
+  });
+
+  it("returns ask_choice when lastTenant expired (>5min inactivity)", async () => {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    vi.mocked(getMemberships).mockResolvedValue({
+      phone: "5491112345678",
+      tenantIds: ["heartlink", "nautica"],
+      updatedAt: {},
+    });
+    vi.mocked(getSession).mockResolvedValue(null);
+    vi.mocked(getLastTenant).mockResolvedValue({
+      tenantId: "heartlink",
+      updatedAt: oneHourAgo,
+      tenantIdsAtChoice: ["heartlink", "nautica"],
+    });
+    vi.mocked(getPendingChoice).mockResolvedValue(null);
+
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5491112345678",
+      { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
+    );
+
+    expect(result.action).toBe("ask_choice");
+    if (result.action === "ask_choice") {
+      expect(result.options).toHaveLength(2);
+    }
+  });
+
+  it("returns ask_choice when membership changed (new tenant added) and lastTenant tenantIdsAtChoice differs", async () => {
+    vi.mocked(getMemberships).mockResolvedValue({
+      phone: "5491112345678",
+      tenantIds: ["heartlink", "nautica", "river"],
+      updatedAt: {},
+    });
+    vi.mocked(getSession).mockResolvedValue(null);
+    vi.mocked(getLastTenant).mockResolvedValue({
+      tenantId: "heartlink",
+      updatedAt: new Date(),
+      tenantIdsAtChoice: ["heartlink", "nautica"],
+    });
+    vi.mocked(getPendingChoice).mockResolvedValue(null);
+    vi.mocked(buildTenantOptions).mockResolvedValue([
+      { index: 1, tenantId: "heartlink", label: "HeartLink" },
+      { index: 2, tenantId: "nautica", label: "Náutica" },
+      { index: 3, tenantId: "river", label: "Escuela River" },
+    ]);
+
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5491112345678",
+      { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
+    );
+
+    expect(result.action).toBe("ask_choice");
+    if (result.action === "ask_choice") {
+      expect(result.options).toHaveLength(3);
     }
   });
 });

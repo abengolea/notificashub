@@ -164,7 +164,7 @@ export function extractIncomingMessages(body: unknown): Array<{
 
 /**
  * Parsea respuesta numérica del usuario (1, 2, 3) para elegir tenant.
- * Soporta texto "1", "2", "3" e interactive list/button reply con id "1", "2", "3".
+ * Soporta: texto "1"/"2", interactive list/button reply, o número embebido ("Elegí un número: 2").
  */
 export function parseNumericChoice(message: {
   type?: string;
@@ -185,8 +185,15 @@ export function parseNumericChoice(message: {
 
   if (message.type === "text" && message.text?.body) {
     const trimmed = message.text.body.trim();
+    // Entero explícito: "1", "2", " 2 "
     const n = parseInt(trimmed, 10);
-    return Number.isInteger(n) && n >= 1 && n <= 9 ? n : null;
+    if (Number.isInteger(n) && n >= 1 && n <= 9) return n;
+    // Número embebido: "Elegí un número: 2", "opción 2", etc.
+    const match = trimmed.match(/\b([1-9])\b/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      return num >= 1 && num <= 9 ? num : null;
+    }
   }
 
   return null;

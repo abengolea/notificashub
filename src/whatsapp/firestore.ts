@@ -69,8 +69,13 @@ export async function getSession(
   if (!snap.exists) return null;
   const d = snap.data();
   if (!d) return null;
+  // Sesiones legacy sin expiresAt/updatedAt → tratar como expiradas
+  if (d.expiresAt == null || d.updatedAt == null) return null;
   const expiresAt = toDate(d.expiresAt);
   if (expiresAt < new Date()) return null; // Sesión expirada
+  const updatedAt = toDate(d.updatedAt);
+  const ageMs = Date.now() - updatedAt.getTime();
+  if (ageMs > 30 * 60 * 1000) return null; // Inactividad >30 min
   return {
     phone: d.phone,
     conversationId: d.conversationId,
@@ -111,6 +116,10 @@ export async function setSession(
     payload.conversationId = data.conversationId;
   }
   await db.collection(WA_SESSIONS).doc(sessionKey).set(payload, { merge: true });
+}
+
+export async function deleteSession(db: Firestore, sessionKey: string): Promise<void> {
+  await db.collection(WA_SESSIONS).doc(sessionKey).delete();
 }
 
 interface WaPendingChoiceData {
