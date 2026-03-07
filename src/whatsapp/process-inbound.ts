@@ -144,17 +144,7 @@ export async function processInbound(
             result.errors.push(`heartlink: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        // Siempre enviar confirmación al usuario para que no quede el chat muerto
-        try {
-          await sendText(
-            from,
-            `Te conectamos con ${tenantName}. Escribí tu consulta y te responderemos a la brevedad.`
-          );
-        } catch (err) {
-          result.errors.push(
-            `send confirmación: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
+        // No enviamos mensaje de confirmación: el tenant (HeartLink, Náutica) responde con su propio flujo.
         result.processed++;
       }
     } catch (err) {
