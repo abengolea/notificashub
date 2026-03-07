@@ -38,7 +38,7 @@ export interface MetaContact {
 export type ResolveAction =
   | { action: "silent_unregistered" }
   | { action: "silent_or_handoff" }
-  | { action: "route"; tenantId: string }
+  | { action: "route"; tenantId: string; fromPendingChoice?: boolean }
   | { action: "ask_choice"; options: TenantOption[] };
 
 export interface TenantOption {
