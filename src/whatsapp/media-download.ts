@@ -38,13 +38,14 @@ async function downloadMediaOnce(mediaId: string): Promise<MediaResult | null> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!metaRes.ok) {
-    console.warn("[media-download] Meta API error:", metaRes.status, await metaRes.text());
+    const errText = await metaRes.text();
+    console.warn("[media-download] Meta API error:", { mediaId, status: metaRes.status, body: errText.slice(0, 200) });
     return null;
   }
   const metaData = (await metaRes.json()) as { url?: string; mime_type?: string; filename?: string };
   const mediaUrl = metaData.url;
   if (!mediaUrl) {
-    console.warn("[media-download] No url in Meta response");
+    console.warn("[media-download] No url in Meta response", { mediaId });
     return null;
   }
 
@@ -53,7 +54,7 @@ async function downloadMediaOnce(mediaId: string): Promise<MediaResult | null> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!blobRes.ok) {
-    console.warn("[media-download] Download error:", blobRes.status);
+    console.warn("[media-download] Download error:", { mediaId, status: blobRes.status });
     return null;
   }
   const buffer = await blobRes.arrayBuffer();
@@ -86,7 +87,7 @@ export async function downloadMediaFromMeta(
       const result = await downloadMediaOnce(mediaId);
       if (result) return result;
     } catch (err) {
-      console.warn(`[media-download] Attempt ${attempt}/${MAX_ATTEMPTS} failed:`, err);
+      console.warn("[media-download] attempt failed", { mediaId, attempt, maxAttempts: MAX_ATTEMPTS, error: err instanceof Error ? err.message : String(err) });
     }
     if (attempt < MAX_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));

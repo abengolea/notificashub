@@ -54,6 +54,11 @@ export async function processInbound(
   for (const { message, from, contactName, value } of extracted) {
     const messageId = message.id;
     const pricingCategory = (value as { pricing?: { category?: string } })?.pricing?.category;
+    const isImageType = message.type === "image" || message.type === "document" || message.type === "sticker" || message.type === "video";
+
+    if (isImageType) {
+      console.log("[msg] received", { id: messageId, type: message.type, from, hasImage: !!message.image, hasDocument: !!message.document });
+    }
 
     try {
       // 1. Idempotencia: claim al recibir. Si ya existe → 200 OK, cortar sin procesar
@@ -64,19 +69,25 @@ export async function processInbound(
       });
 
       if (!claim.claimed) {
+        if (isImageType) console.log("[msg] early-exit", { id: messageId, step: "duplicate" });
         result.duplicate++;
         continue;
       }
 
       const incoming = toIncomingMessage(message, from);
+      if (isImageType) {
+        console.log("[msg] after-extract", { id: messageId, type: incoming.type });
+      }
       const resolveResult = await resolveTenantForIncomingMessage(db, from, incoming);
 
       if (resolveResult.action === "silent_unregistered") {
+        if (isImageType) console.log("[msg] early-exit", { id: messageId, step: "silent_unregistered" });
         result.processed++;
         continue;
       }
 
       if (resolveResult.action === "silent_or_handoff") {
+        if (isImageType) console.log("[msg] early-exit", { id: messageId, step: "silent_or_handoff" });
         result.processed++;
         continue;
       }
@@ -127,14 +138,21 @@ export async function processInbound(
         // Para document/image/video/sticker: SIEMPRE base64. NauticAdmin no tiene token de Meta.
         const mediaId = getMediaIdFromMessage(message);
         const isMediaMessage = mediaId && (message.type === "document" || message.type === "image" || message.type === "video" || message.type === "sticker");
-        if (message.type === "image" || message.type === "document" || message.type === "sticker") {
-          console.log("[NotificasHub] Mensaje type:", message.type, "mediaId:", mediaId ?? "null", "isMediaMessage:", isMediaMessage);
+        if (isImageType && !mediaId) {
+          console.log("[msg] early-exit", { id: messageId, step: "missing-media-id", type: message.type });
+          try {
+            await sendText(from, "No pudimos obtener el archivo. Por favor intentá de nuevo.");
+          } catch (sendErr) {
+            result.errors.push(`fallback missing-media: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
+          }
+          result.processed++;
+          continue;
         }
         if (isMediaMessage) {
-          console.log("[NotificasHub] Media recibida, type:", message.type, "mediaId:", mediaId);
+          console.log("[msg] before-media-download", { id: messageId, mediaId, type: message.type });
           const media = await downloadMediaFromMeta(mediaId!);
           if (!media) {
-            console.warn("[NotificasHub] No se pudo descargar media para reenviar a tenant:", messageId);
+            console.error("[msg] processing-error", { id: messageId, type: message.type, step: "media-download", error: "downloadMediaFromMeta returned null" });
             try {
               await sendText(
                 from,
@@ -157,20 +175,21 @@ export async function processInbound(
             basePayload.imageBase64 = media.base64;
             const imgObj = (message as Record<string, unknown>).image ?? (message as Record<string, unknown>).sticker ?? {};
             (message as Record<string, unknown>).image = { ...(imgObj as object), base64: media.base64 };
-            console.log("[NotificasHub] imageBase64 añadido, length:", media.base64.length, "originalType:", message.type);
           } else {
             basePayload.videoBase64 = media.base64;
             if (media.mimeType) basePayload.videoMimeType = media.mimeType;
             (message as Record<string, unknown>).video = { ...(message.video || {}), base64: media.base64 };
           }
+          console.log("[msg] after-media-download", { id: messageId, ok: true, mimeType: media.mimeType, size: media.base64.length });
         }
 
         if (!tenant?.webhookUrl || !tenant.internalSecret) {
+          if (isImageType) console.log("[msg] early-exit", { id: messageId, step: "missing-tenant", tenantId: resolveResult.tenantId, hasWebhook: !!tenant?.webhookUrl });
           console.warn("[NotificasHub] Tenant sin webhookUrl o internalSecret, no se puede reenviar:", resolveResult.tenantId, "webhookUrl:", !!tenant?.webhookUrl);
         }
         if (tenant?.webhookUrl && tenant.internalSecret) {
-          if (isMediaMessage) {
-            console.log("[NotificasHub] Reenviando a tenant con media, payload keys:", Object.keys(basePayload));
+          if (isImageType) {
+            console.log("[msg] before-tenant-post", { id: messageId, tenantId: resolveResult.tenantId, type: message.type });
           }
           try {
             const res = await fetch(tenant.webhookUrl, {
@@ -183,12 +202,14 @@ export async function processInbound(
             });
             if (!res.ok) {
               const text = await res.text();
-              console.warn("[NotificasHub] POST a tenant falló:", res.status, resolveResult.tenantId, text.slice(0, 200));
+              console.error("[msg] processing-error", { id: messageId, type: message.type, step: "tenant-post", error: `${res.status} ${text.slice(0, 100)}`, tenantId: resolveResult.tenantId });
               result.errors.push(`tenant ${resolveResult.tenantId}: ${res.status} ${text}`);
             } else {
+              if (isImageType) console.log("[msg] tenant-post-ok", { id: messageId, tenantId: resolveResult.tenantId });
               forwarded = true;
             }
           } catch (err) {
+            console.error("[msg] processing-error", { id: messageId, type: message.type, step: "tenant-post", error: err instanceof Error ? err.message : String(err), tenantId: resolveResult.tenantId });
             result.errors.push(
               `tenant ${resolveResult.tenantId}: ${err instanceof Error ? err.message : String(err)}`
             );
@@ -238,9 +259,9 @@ export async function processInbound(
         result.processed++;
       }
     } catch (err) {
-      result.errors.push(
-        `message ${messageId}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[msg] processing-error", { id: messageId, type: message?.type, step: "catch", error: errMsg });
+      result.errors.push(`message ${messageId}: ${errMsg}`);
     }
   }
 
