@@ -46,7 +46,7 @@ const metaMessageSchema = z
     id: z.string(),
     from: z.string(),
     timestamp: z.string(),
-    type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button", "contacts"]),
+    type: z.enum(["text", "interactive", "image", "audio", "video", "document", "button", "contacts", "sticker"]),
     text: metaTextSchema.optional(),
     interactive: metaInteractiveReplySchema.optional(),
     referral: metaReferralSchema.optional(),
@@ -54,6 +54,7 @@ const metaMessageSchema = z
     image: metaMediaSchema.optional(),
     audio: metaMediaSchema.optional(),
     document: metaMediaSchema.optional(),
+    sticker: metaMediaSchema.optional(),
     contacts: z.array(z.unknown()).optional(),
   })
   .passthrough();
@@ -96,7 +97,10 @@ export function extractIncomingMessages(body: unknown): Array<{
   value: z.infer<typeof metaValueSchema>;
 }> {
   const parsed = webhookBodySchema.safeParse(body);
-  if (!parsed.success) return [];
+  if (!parsed.success) {
+    console.warn("[extractIncomingMessages] body schema rejected:", parsed.error?.issues?.slice(0, 3));
+    return [];
+  }
 
   const entries = parsed.data.entry ?? [];
   const result: Array<{
@@ -112,16 +116,25 @@ export function extractIncomingMessages(body: unknown): Array<{
       const value = change.value;
       if (!value?.messages?.length) continue;
 
-      for (const message of value.messages) {
+      for (let i = 0; i < value.messages.length; i++) {
+        const message = value.messages[i];
+        const rawType = (message as { type?: string })?.type ?? "?";
         const msgParsed = metaMessageSchema.safeParse(message);
         if (!msgParsed.success) {
-          console.warn("[validate] metaMessageSchema rechazó mensaje:", (message as { type?: string }).type, msgParsed.error?.issues?.slice(0, 2));
+          const reason = msgParsed.error?.issues?.[0]?.message ?? "schema_error";
+          console.warn("[extractIncomingMessages] discarded", {
+            index: i,
+            rawType,
+            reason,
+            issues: msgParsed.error?.issues?.slice(0, 2).map((iss) => ({ path: iss.path, msg: iss.message })),
+          });
           continue;
         }
 
-        const from = message.from ?? value.contacts?.[0]?.wa_id ?? "";
+        const from = msgParsed.data.from ?? value.contacts?.[0]?.wa_id ?? "";
         const contactName = value.contacts?.[0]?.profile?.name;
 
+        console.log("[extractIncomingMessages] accepted", { index: i, type: msgParsed.data.type, id: msgParsed.data.id?.slice(0, 20) });
         result.push({
           message: msgParsed.data,
           from,
@@ -147,15 +160,25 @@ export function extractIncomingMessages(body: unknown): Array<{
     if (value && typeof value === "object") {
       const v = value as { messages?: unknown[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] };
       const messages = v.messages ?? [];
-      for (const msg of messages) {
+      console.log("[extractIncomingMessages] fallback path", { messagesCount: messages.length });
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        const rawType = (msg as { type?: string })?.type ?? "?";
         const msgParsed = metaMessageSchema.safeParse(msg);
         if (msgParsed.success) {
           const from = msgParsed.data.from ?? v.contacts?.[0]?.wa_id ?? "";
+          console.log("[extractIncomingMessages] accepted (fallback)", { index: i, type: msgParsed.data.type });
           result.push({
             message: msgParsed.data,
             from,
             contactName: v.contacts?.[0]?.profile?.name,
             value: v as z.infer<typeof metaValueSchema>,
+          });
+        } else {
+          console.warn("[extractIncomingMessages] discarded (fallback)", {
+            index: i,
+            rawType,
+            reason: msgParsed.error?.issues?.[0]?.message,
           });
         }
       }

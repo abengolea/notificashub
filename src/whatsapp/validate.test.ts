@@ -189,6 +189,78 @@ describe("extractIncomingMessages", () => {
     expect(result[0].message.video?.id).toBe("MEDIA_ID_AQUI");
     expect(result[0].message.video?.mime_type).toBe("video/mp4");
   });
+
+  it("extracts image message (WhatsApp Cloud API structure - comprobante/captura)", () => {
+    const body = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "123456789",
+          changes: [
+            {
+              value: {
+                messaging_product: "whatsapp",
+                metadata: { display_phone_number: "15550000000", phone_number_id: "123" },
+                contacts: [{ wa_id: "5493364645357", profile: { name: "HECTOR EDGARDO" } }],
+                messages: [
+                  {
+                    id: "wamid.IMG123",
+                    from: "5493364645357",
+                    timestamp: "1710000000",
+                    type: "image",
+                    image: {
+                      id: "MEDIA_ID_IMAGEN",
+                      mime_type: "image/jpeg",
+                      sha256: "abc123",
+                      caption: "comprobante",
+                    },
+                  },
+                ],
+              },
+              field: "messages",
+            },
+          ],
+        },
+      ],
+    };
+    const result = extractIncomingMessages(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].message.type).toBe("image");
+    expect(result[0].message.image).toBeDefined();
+    expect(result[0].message.image?.id).toBe("MEDIA_ID_IMAGEN");
+    expect(result[0].message.image?.mime_type).toBe("image/jpeg");
+    expect(result[0].from).toBe("5493364645357");
+    expect(result[0].contactName).toBe("HECTOR EDGARDO");
+  });
+
+  it("extracts document message (PDF comprobante)", () => {
+    const body = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.DOC123",
+                    from: "5493364645357",
+                    timestamp: "1710000001",
+                    type: "document",
+                    document: { id: "MEDIA_ID_PDF", mime_type: "application/pdf", filename: "comprobante.pdf" },
+                  },
+                ],
+                contacts: [{ wa_id: "5493364645357", profile: { name: "Usuario" } }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const result = extractIncomingMessages(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].message.type).toBe("document");
+    expect(result[0].message.document?.id).toBe("MEDIA_ID_PDF");
+  });
 });
 
 describe("toIncomingMessage", () => {

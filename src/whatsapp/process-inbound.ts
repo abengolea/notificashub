@@ -25,18 +25,28 @@ export async function processInbound(
 
   const extracted = extractIncomingMessages(body);
 
-  // Diagnóstico: si hay messages en el body pero extracted está vacío, algo falló en el parse
-  const rawMsgCount = (body as { entry?: { changes?: { value?: { messages?: unknown[] } }[] }[] })?.entry?.[0]?.changes?.[0]?.value?.messages?.length ?? 0;
-  if (rawMsgCount > 0 && extracted.length === 0) {
-    const firstRaw = (body as { entry?: { changes?: { value?: { messages?: unknown[] } }[] }[] })?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  // Diagnóstico: contar mensajes en TODO el body (todos los entry/changes) vs extraídos
+  let rawMsgTotal = 0;
+  let firstRawMsg: { type?: string } | null = null;
+  const entries = (body as { entry?: { changes?: { value?: { messages?: unknown[] } }[] }[] })?.entry ?? [];
+  for (const entry of entries) {
+    for (const change of entry?.changes ?? []) {
+      const msgs = change?.value?.messages ?? [];
+      rawMsgTotal += msgs.length;
+      if (msgs.length > 0 && !firstRawMsg) {
+        firstRawMsg = msgs[0] as { type?: string };
+      }
+    }
+  }
+  if (rawMsgTotal > 0 && extracted.length === 0) {
     console.warn("[NotificasHub] Mensajes en payload pero extractIncomingMessages=0:", {
-      rawMsgCount,
-      firstMsgType: (firstRaw as { type?: string })?.type,
-      firstMsgKeys: firstRaw ? Object.keys(firstRaw as object) : [],
+      rawMsgTotal,
+      firstMsgType: firstRawMsg?.type,
+      firstMsgKeys: firstRawMsg ? Object.keys(firstRawMsg as object) : [],
     });
   } else if (extracted.length > 0) {
     const first = extracted[0].message;
-    if (first.type === "image" || first.type === "document") {
+    if (first.type === "image" || first.type === "document" || first.type === "sticker") {
       console.log("[NotificasHub] extractIncomingMessages: media OK", { count: extracted.length, type: first.type });
     }
   }
@@ -114,10 +124,10 @@ export async function processInbound(
           type: message.type,
         };
 
-        // Para document/image/video: SIEMPRE base64. NauticAdmin no tiene token de Meta.
+        // Para document/image/video/sticker: SIEMPRE base64. NauticAdmin no tiene token de Meta.
         const mediaId = getMediaIdFromMessage(message);
-        const isMediaMessage = mediaId && (message.type === "document" || message.type === "image" || message.type === "video");
-        if (message.type === "image" || message.type === "document") {
+        const isMediaMessage = mediaId && (message.type === "document" || message.type === "image" || message.type === "video" || message.type === "sticker");
+        if (message.type === "image" || message.type === "document" || message.type === "sticker") {
           console.log("[NotificasHub] Mensaje type:", message.type, "mediaId:", mediaId ?? "null", "isMediaMessage:", isMediaMessage);
         }
         if (isMediaMessage) {
@@ -143,10 +153,11 @@ export async function processInbound(
             basePayload.documentMimeType = media.mimeType ?? "application/pdf";
             if (media.filename) basePayload.documentFilename = media.filename;
             (message as Record<string, unknown>).document = { ...(message.document || {}), base64: media.base64 };
-          } else if (message.type === "image") {
+          } else if (message.type === "image" || message.type === "sticker") {
             basePayload.imageBase64 = media.base64;
-            (message as Record<string, unknown>).image = { ...(message.image || {}), base64: media.base64 };
-            console.log("[NotificasHub] imageBase64 añadido, length:", media.base64.length);
+            const imgObj = (message as Record<string, unknown>).image ?? (message as Record<string, unknown>).sticker ?? {};
+            (message as Record<string, unknown>).image = { ...(imgObj as object), base64: media.base64 };
+            console.log("[NotificasHub] imageBase64 añadido, length:", media.base64.length, "originalType:", message.type);
           } else {
             basePayload.videoBase64 = media.base64;
             if (media.mimeType) basePayload.videoMimeType = media.mimeType;

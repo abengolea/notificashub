@@ -55,17 +55,25 @@ export async function POST(req: NextRequest) {
         : [],
     });
 
-    // Diagnóstico: si llega image/document, loguear estructura para debugging
-    const firstMsg = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (firstMsg && (firstMsg.type === "image" || firstMsg.type === "document")) {
-      console.log("[webhook] INBOUND MEDIA:", {
-        type: firstMsg.type,
-        hasImageId: !!firstMsg?.image?.id,
-        hasDocumentId: !!firstMsg?.document?.id,
-        from: firstMsg.from,
-        msgKeys: firstMsg ? Object.keys(firstMsg) : [],
-      });
-    }
+    // Summary estructurado del payload (antes de extractIncomingMessages)
+    const allMessages = body?.entry?.flatMap?.(
+      (e: { changes?: { value?: { messages?: unknown[] } }[] }) =>
+        (e?.changes ?? []).flatMap((c) => c?.value?.messages ?? [])
+    ) ?? [];
+    const messageTypes = allMessages.map((m: { type?: string }) => m?.type ?? "?");
+    const hasStatuses = body?.entry?.some?.(
+      (e: { changes?: { value?: { statuses?: unknown[] } }[] }) =>
+        (e?.changes ?? []).some((c) => Array.isArray(c?.value?.statuses))
+    ) ?? false;
+    console.log("[webhook] summary", {
+      hasEntry: !!body?.entry,
+      entriesCount: body?.entry?.length ?? 0,
+      changesCount: body?.entry?.flatMap?.((e: { changes?: unknown[] }) => e?.changes ?? [])?.length ?? 0,
+      hasMessages: allMessages.length > 0,
+      messageCount: allMessages.length,
+      messageTypes,
+      hasStatuses,
+    });
 
     // Router multi-tenant: procesa mensajes entrantes (idempotente)
     const { messages: msgResult } = await handleIncomingWebhook(db, body);
@@ -79,26 +87,21 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Actualizar statuses en whatsappMessages (legacy)
     for (const s of statuses) {
       const messageId = s.id;
       const newStatus = s.status;
       const timestamp = s.timestamp;
-
       const ref = db.collection("whatsappMessages").doc(messageId);
       const snap = await ref.get();
-
       if (!snap.exists) {
         console.warn("[webhook] Mensaje no encontrado para status:", messageId);
         continue;
       }
-
       const update: Record<string, unknown> = { status: newStatus };
       if (newStatus === "delivered") update.deliveredAt = new Date(Number(timestamp) * 1000);
       if (newStatus === "read") update.readAt = new Date(Number(timestamp) * 1000);
       if (newStatus === "failed") update.failedAt = new Date(Number(timestamp) * 1000);
       if (s.pricingCategory) update.pricingCategory = s.pricingCategory;
-
       await ref.update(update);
       console.log(`[webhook] Mensaje ${messageId} → ${newStatus}`);
     }

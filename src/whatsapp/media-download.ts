@@ -99,10 +99,11 @@ export async function downloadMediaFromMeta(
  * Extrae mediaId de message según type (document, image, etc.)
  */
 export function getMediaIdFromMessage(
-  message: { type?: string; document?: { id?: string }; image?: { id?: string }; video?: { id?: string }; audio?: { id?: string } }
+  message: { type?: string; document?: { id?: string }; image?: { id?: string }; video?: { id?: string }; audio?: { id?: string }; sticker?: { id?: string } }
 ): string | null {
   if (message.type === "document" && message.document?.id) return message.document.id;
   if (message.type === "image" && message.image?.id) return message.image.id;
+  if (message.type === "sticker" && message.sticker?.id) return message.sticker.id;
   if (message.type === "video" && message.video?.id) return message.video.id;
   if (message.type === "audio" && message.audio?.id) return message.audio.id;
   return null;
