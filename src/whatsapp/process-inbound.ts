@@ -97,18 +97,21 @@ export async function processInbound(
           tenantId: resolveResult.tenantId,
         };
 
-        // Para document/image: SIEMPRE base64. NauticAdmin no tiene token de Meta, no puede usar mediaUrl.
-        // Si la descarga falla, no reenviar; avisar al usuario.
+        // Para document/image/video: SIEMPRE base64. NauticAdmin no tiene token de Meta.
         const mediaId = getMediaIdFromMessage(message);
-        const isMediaMessage = mediaId && (message.type === "document" || message.type === "image");
+        const isMediaMessage = mediaId && (message.type === "document" || message.type === "image" || message.type === "video");
+        if (message.type === "image" || message.type === "document") {
+          console.log("[NotificasHub] Mensaje type:", message.type, "mediaId:", mediaId ?? "null", "isMediaMessage:", isMediaMessage);
+        }
         if (isMediaMessage) {
+          console.log("[NotificasHub] Media recibida, type:", message.type, "mediaId:", mediaId);
           const media = await downloadMediaFromMeta(mediaId!);
           if (!media) {
             console.warn("[NotificasHub] No se pudo descargar media para reenviar a tenant:", messageId);
             try {
               await sendText(
                 from,
-                "No pudimos procesar el archivo. Por favor intentá de nuevo enviando la imagen o PDF."
+                "No pudimos procesar el archivo. Por favor intentá de nuevo enviando la imagen, PDF o video."
               );
             } catch (sendErr) {
               result.errors.push(
@@ -122,12 +125,19 @@ export async function processInbound(
             (basePayload as Record<string, unknown>).documentBase64 = media.base64;
             (basePayload as Record<string, unknown>).documentMimeType = media.mimeType ?? "application/pdf";
             if (media.filename) (basePayload as Record<string, unknown>).documentFilename = media.filename;
-          } else {
+          } else if (message.type === "image") {
             (basePayload as Record<string, unknown>).imageBase64 = media.base64;
+            console.log("[NotificasHub] imageBase64 añadido, length:", media.base64.length);
+          } else {
+            (basePayload as Record<string, unknown>).videoBase64 = media.base64;
+            if (media.mimeType) (basePayload as Record<string, unknown>).videoMimeType = media.mimeType;
           }
         }
 
         if (tenant?.webhookUrl && tenant.internalSecret) {
+          if (isMediaMessage) {
+            console.log("[NotificasHub] Reenviando a tenant con media, payload keys:", Object.keys(basePayload));
+          }
           try {
             const res = await fetch(tenant.webhookUrl, {
               method: "POST",
