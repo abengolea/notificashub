@@ -88,13 +88,14 @@ export async function processInbound(
           });
         }
         let forwarded = false;
-        const basePayload = {
+        const basePayload: Record<string, unknown> = {
           message,
           from,
           contactName,
           messageId,
           timestamp: message.timestamp,
           tenantId: resolveResult.tenantId,
+          type: message.type,
         };
 
         // Para document/image/video: SIEMPRE base64. NauticAdmin no tiene token de Meta.
@@ -122,18 +123,24 @@ export async function processInbound(
             continue;
           }
           if (message.type === "document") {
-            (basePayload as Record<string, unknown>).documentBase64 = media.base64;
-            (basePayload as Record<string, unknown>).documentMimeType = media.mimeType ?? "application/pdf";
-            if (media.filename) (basePayload as Record<string, unknown>).documentFilename = media.filename;
+            basePayload.documentBase64 = media.base64;
+            basePayload.documentMimeType = media.mimeType ?? "application/pdf";
+            if (media.filename) basePayload.documentFilename = media.filename;
+            (message as Record<string, unknown>).document = { ...(message.document || {}), base64: media.base64 };
           } else if (message.type === "image") {
-            (basePayload as Record<string, unknown>).imageBase64 = media.base64;
+            basePayload.imageBase64 = media.base64;
+            (message as Record<string, unknown>).image = { ...(message.image || {}), base64: media.base64 };
             console.log("[NotificasHub] imageBase64 añadido, length:", media.base64.length);
           } else {
-            (basePayload as Record<string, unknown>).videoBase64 = media.base64;
-            if (media.mimeType) (basePayload as Record<string, unknown>).videoMimeType = media.mimeType;
+            basePayload.videoBase64 = media.base64;
+            if (media.mimeType) basePayload.videoMimeType = media.mimeType;
+            (message as Record<string, unknown>).video = { ...(message.video || {}), base64: media.base64 };
           }
         }
 
+        if (!tenant?.webhookUrl || !tenant.internalSecret) {
+          console.warn("[NotificasHub] Tenant sin webhookUrl o internalSecret, no se puede reenviar:", resolveResult.tenantId, "webhookUrl:", !!tenant?.webhookUrl);
+        }
         if (tenant?.webhookUrl && tenant.internalSecret) {
           if (isMediaMessage) {
             console.log("[NotificasHub] Reenviando a tenant con media, payload keys:", Object.keys(basePayload));
@@ -149,6 +156,7 @@ export async function processInbound(
             });
             if (!res.ok) {
               const text = await res.text();
+              console.warn("[NotificasHub] POST a tenant falló:", res.status, resolveResult.tenantId, text.slice(0, 200));
               result.errors.push(`tenant ${resolveResult.tenantId}: ${res.status} ${text}`);
             } else {
               forwarded = true;
