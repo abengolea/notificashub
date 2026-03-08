@@ -74,6 +74,12 @@ export async function POST(req: NextRequest) {
       messageTypes,
       hasStatuses,
     });
+    if (allMessages.length > 0) {
+      console.log("[webhook] *** INCOMING MESSAGE ***", {
+        types: messageTypes,
+        firstId: (allMessages[0] as { id?: string })?.id?.slice(0, 30),
+      });
+    }
 
     // Router multi-tenant: procesa mensajes entrantes (idempotente)
     const { messages: msgResult } = await handleIncomingWebhook(db, body);
