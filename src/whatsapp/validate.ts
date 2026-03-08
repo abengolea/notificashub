@@ -114,7 +114,10 @@ export function extractIncomingMessages(body: unknown): Array<{
 
       for (const message of value.messages) {
         const msgParsed = metaMessageSchema.safeParse(message);
-        if (!msgParsed.success) continue;
+        if (!msgParsed.success) {
+          console.warn("[validate] metaMessageSchema rechazó mensaje:", (message as { type?: string }).type, msgParsed.error?.issues?.slice(0, 2));
+          continue;
+        }
 
         const from = message.from ?? value.contacts?.[0]?.wa_id ?? "";
         const contactName = value.contacts?.[0]?.profile?.name;

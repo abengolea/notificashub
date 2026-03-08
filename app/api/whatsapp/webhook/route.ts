@@ -55,6 +55,18 @@ export async function POST(req: NextRequest) {
         : [],
     });
 
+    // Diagnóstico: si llega image/document, loguear estructura para debugging
+    const firstMsg = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (firstMsg && (firstMsg.type === "image" || firstMsg.type === "document")) {
+      console.log("[webhook] INBOUND MEDIA:", {
+        type: firstMsg.type,
+        hasImageId: !!firstMsg?.image?.id,
+        hasDocumentId: !!firstMsg?.document?.id,
+        from: firstMsg.from,
+        msgKeys: firstMsg ? Object.keys(firstMsg) : [],
+      });
+    }
+
     // Router multi-tenant: procesa mensajes entrantes (idempotente)
     const { messages: msgResult } = await handleIncomingWebhook(db, body);
     if (msgResult.errors.length > 0) {

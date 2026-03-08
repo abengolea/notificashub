@@ -25,6 +25,22 @@ export async function processInbound(
 
   const extracted = extractIncomingMessages(body);
 
+  // Diagnóstico: si hay messages en el body pero extracted está vacío, algo falló en el parse
+  const rawMsgCount = (body as { entry?: { changes?: { value?: { messages?: unknown[] } }[] }[] })?.entry?.[0]?.changes?.[0]?.value?.messages?.length ?? 0;
+  if (rawMsgCount > 0 && extracted.length === 0) {
+    const firstRaw = (body as { entry?: { changes?: { value?: { messages?: unknown[] } }[] }[] })?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    console.warn("[NotificasHub] Mensajes en payload pero extractIncomingMessages=0:", {
+      rawMsgCount,
+      firstMsgType: (firstRaw as { type?: string })?.type,
+      firstMsgKeys: firstRaw ? Object.keys(firstRaw as object) : [],
+    });
+  } else if (extracted.length > 0) {
+    const first = extracted[0].message;
+    if (first.type === "image" || first.type === "document") {
+      console.log("[NotificasHub] extractIncomingMessages: media OK", { count: extracted.length, type: first.type });
+    }
+  }
+
   for (const { message, from, contactName, value } of extracted) {
     const messageId = message.id;
     const pricingCategory = (value as { pricing?: { category?: string } })?.pricing?.category;
