@@ -9,6 +9,7 @@ import { claimInboundMessage } from "./idempotency";
 import { resolveTenantForIncomingMessage } from "./resolve-tenant";
 import { getTenantInfo } from "./tenants";
 import { sendText, sendInteractiveList } from "./sender";
+import { downloadMediaFromMeta, getMediaIdFromMessage } from "./media-download";
 
 export interface ProcessInboundResult {
   processed: number;
@@ -87,6 +88,45 @@ export async function processInbound(
           });
         }
         let forwarded = false;
+        const basePayload = {
+          message,
+          from,
+          contactName,
+          messageId,
+          timestamp: message.timestamp,
+          tenantId: resolveResult.tenantId,
+        };
+
+        // Para document/image: SIEMPRE base64. NauticAdmin no tiene token de Meta, no puede usar mediaUrl.
+        // Si la descarga falla, no reenviar; avisar al usuario.
+        const mediaId = getMediaIdFromMessage(message);
+        const isMediaMessage = mediaId && (message.type === "document" || message.type === "image");
+        if (isMediaMessage) {
+          const media = await downloadMediaFromMeta(mediaId!);
+          if (!media) {
+            console.warn("[NotificasHub] No se pudo descargar media para reenviar a tenant:", messageId);
+            try {
+              await sendText(
+                from,
+                "No pudimos procesar el archivo. Por favor intentá de nuevo enviando la imagen o PDF."
+              );
+            } catch (sendErr) {
+              result.errors.push(
+                `fallback media error: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`
+              );
+            }
+            result.processed++;
+            continue;
+          }
+          if (message.type === "document") {
+            (basePayload as Record<string, unknown>).documentBase64 = media.base64;
+            (basePayload as Record<string, unknown>).documentMimeType = media.mimeType ?? "application/pdf";
+            if (media.filename) (basePayload as Record<string, unknown>).documentFilename = media.filename;
+          } else {
+            (basePayload as Record<string, unknown>).imageBase64 = media.base64;
+          }
+        }
+
         if (tenant?.webhookUrl && tenant.internalSecret) {
           try {
             const res = await fetch(tenant.webhookUrl, {
@@ -95,14 +135,7 @@ export async function processInbound(
                 "Content-Type": "application/json",
                 "x-internal-token": tenant.internalSecret,
               },
-              body: JSON.stringify({
-                message,
-                from,
-                contactName,
-                messageId,
-                timestamp: message.timestamp,
-                tenantId: resolveResult.tenantId,
-              }),
+              body: JSON.stringify(basePayload),
             });
             if (!res.ok) {
               const text = await res.text();
@@ -121,20 +154,14 @@ export async function processInbound(
           process.env.INTERNAL_SECRET
         ) {
           try {
+            const heartlinkPayload = { ...basePayload, tenantId: "heartlink" as const };
             const res = await fetch(`${process.env.HEARTLINK_URL}/api/whatsapp/incoming`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 "x-internal-token": process.env.INTERNAL_SECRET,
               },
-              body: JSON.stringify({
-                message,
-                from,
-                contactName,
-                messageId,
-                timestamp: message.timestamp,
-                tenantId: "heartlink",
-              }),
+              body: JSON.stringify(heartlinkPayload),
             });
             if (!res.ok) {
               const text = await res.text();
