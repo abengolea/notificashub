@@ -40,51 +40,53 @@ export async function POST(req: NextRequest) {
       preview: rawText.slice(0, 250),
     });
 
-    let body: unknown;
+    let body: Record<string, unknown>;
     try {
-      body = rawText ? JSON.parse(rawText) : {};
+      body = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
     } catch (parseErr) {
       console.error("[webhook-raw] JSON parse failed:", parseErr);
       return NextResponse.json({ ok: true });
     }
 
+    type WebhookValue = { messages?: { from?: string; type?: string }[]; statuses?: unknown[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] };
+    const bodyAny = body as { entry?: { changes?: { value?: WebhookValue }[] }[] };
     // Debug: último webhook recibido
     const hasMessages = !!(
-      body?.entry?.some?.(
+      bodyAny?.entry?.some?.(
         (e: { changes?: { value?: { messages?: unknown[] } }[] }) =>
           e?.changes?.some?.((c) => c?.value?.messages?.length)
-      ) ?? body?.entry?.[0]?.changes?.[0]?.value?.messages?.length
+      ) ?? bodyAny?.entry?.[0]?.changes?.[0]?.value?.messages?.length
     );
     const statuses = extractStatuses(body);
-    const from = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from ??
-      body?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.wa_id;
+    const from = bodyAny?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from ??
+      bodyAny?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.wa_id;
 
     setLastWebhook({
       at: new Date().toISOString(),
       hasMessage: hasMessages,
       hasStatuses: statuses.length > 0,
-      from,
-      messageType: body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.type,
+      from: from as string | undefined,
+      messageType: bodyAny?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.type as string | undefined,
       bodyKeys: body ? Object.keys(body) : [],
-      valueKeys: body?.entry?.[0]?.changes?.[0]?.value
-        ? Object.keys(body.entry[0].changes[0].value)
+      valueKeys: bodyAny?.entry?.[0]?.changes?.[0]?.value
+        ? Object.keys(bodyAny.entry[0].changes[0].value)
         : [],
     });
 
     // Summary estructurado del payload (antes de extractIncomingMessages)
-    const allMessages = body?.entry?.flatMap?.(
+    const allMessages = bodyAny?.entry?.flatMap?.(
       (e: { changes?: { value?: { messages?: unknown[] } }[] }) =>
         (e?.changes ?? []).flatMap((c) => c?.value?.messages ?? [])
     ) ?? [];
-    const messageTypes = allMessages.map((m: { type?: string }) => m?.type ?? "?");
-    const hasStatuses = body?.entry?.some?.(
+    const messageTypes = allMessages.map((m: unknown) => (m as { type?: string })?.type ?? "?");
+    const hasStatuses = bodyAny?.entry?.some?.(
       (e: { changes?: { value?: { statuses?: unknown[] } }[] }) =>
         (e?.changes ?? []).some((c) => Array.isArray(c?.value?.statuses))
     ) ?? false;
     console.log("[webhook] summary", {
-      hasEntry: !!body?.entry,
-      entriesCount: body?.entry?.length ?? 0,
-      changesCount: body?.entry?.flatMap?.((e: { changes?: unknown[] }) => e?.changes ?? [])?.length ?? 0,
+      hasEntry: !!bodyAny?.entry,
+      entriesCount: bodyAny?.entry?.length ?? 0,
+      changesCount: bodyAny?.entry?.flatMap?.((e: { changes?: unknown[] }) => e?.changes ?? [])?.length ?? 0,
       hasMessages: allMessages.length > 0,
       messageCount: allMessages.length,
       messageTypes,
