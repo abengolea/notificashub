@@ -30,7 +30,23 @@ export async function POST(req: NextRequest) {
   const { db } = await import("@/lib/firebase-admin");
 
   try {
-    const body = await req.json();
+    // Leer body como texto PRIMERO para detectar parsing/body-consumed issues
+    const rawText = await req.text();
+    console.log("[webhook-raw]", {
+      len: rawText.length,
+      hasMessages: rawText.includes('"messages"'),
+      hasImage: rawText.includes('"image"'),
+      hasStatuses: rawText.includes('"statuses"'),
+      preview: rawText.slice(0, 250),
+    });
+
+    let body: unknown;
+    try {
+      body = rawText ? JSON.parse(rawText) : {};
+    } catch (parseErr) {
+      console.error("[webhook-raw] JSON parse failed:", parseErr);
+      return NextResponse.json({ ok: true });
+    }
 
     // Debug: último webhook recibido
     const hasMessages = !!(
