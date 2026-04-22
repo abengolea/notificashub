@@ -47,6 +47,7 @@ describe("resolveTenantForIncomingMessage", () => {
   });
 
   it("returns silent_unregistered when no membership", async () => {
+    vi.stubEnv("DEFAULT_INBOUND_TENANT_ID", "");
     vi.mocked(getMemberships).mockResolvedValue(null);
     const result = await resolveTenantForIncomingMessage(
       mockDb,
@@ -54,9 +55,23 @@ describe("resolveTenantForIncomingMessage", () => {
       { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
     );
     expect(result).toEqual({ action: "silent_unregistered" });
+    vi.unstubAllEnvs();
+  });
+
+  it("routes to DEFAULT_INBOUND_TENANT_ID when no membership", async () => {
+    vi.stubEnv("DEFAULT_INBOUND_TENANT_ID", "planesdeahorro");
+    vi.mocked(getMemberships).mockResolvedValue(null);
+    const result = await resolveTenantForIncomingMessage(
+      mockDb,
+      "5491112345678",
+      { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
+    );
+    expect(result).toEqual({ action: "route", tenantId: "planesdeahorro" });
+    vi.unstubAllEnvs();
   });
 
   it("returns silent_unregistered when membership has empty tenantIds", async () => {
+    vi.stubEnv("DEFAULT_INBOUND_TENANT_ID", "");
     vi.mocked(getMemberships).mockResolvedValue({
       phone: "5491112345678",
       tenantIds: [],
@@ -68,6 +83,7 @@ describe("resolveTenantForIncomingMessage", () => {
       { id: "1", from: "5491112345678", timestamp: "123", type: "text" }
     );
     expect(result).toEqual({ action: "silent_unregistered" });
+    vi.unstubAllEnvs();
   });
 
   it("returns route when single tenant", async () => {

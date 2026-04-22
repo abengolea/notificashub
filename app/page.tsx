@@ -72,6 +72,7 @@ const STORAGE_KEY = "dashboard-token";
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [storedToken, setStoredToken] = useState<string | null>(null);
 
   useEffect(() => {
@@ -152,7 +153,18 @@ export default function Home() {
       setStoredToken(token);
     } catch (err: unknown) {
       const e = err as { code?: string; message?: string };
-      setError(e.code === "auth/invalid-credential" ? "Email o contraseña incorrectos" : "Error al iniciar sesión");
+      const msg =
+        e.code === "auth/invalid-credential"
+          ? "Email o contraseña incorrectos"
+          : e.code === "auth/user-not-found"
+            ? "Usuario no existe. Creá el usuario en Firebase Console → Authentication → Users"
+            : e.code === "auth/operation-not-allowed"
+              ? "Email/Password no está habilitado. Habilitá en Firebase Console → Authentication → Sign-in method"
+              : e.code === "auth/invalid-email"
+                ? "Email inválido"
+                : e?.message ?? "Error al iniciar sesión";
+      setError(msg);
+      console.error("[Login error]", e.code, e.message);
     } finally {
       setLoading(false);
     }
@@ -198,14 +210,25 @@ export default function Home() {
           <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
             Contraseña
           </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-4 py-2 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-            placeholder="Contraseña"
-            autoComplete="current-password"
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-4 py-2 pr-12 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              placeholder="Contraseña"
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((s) => !s)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              tabIndex={-1}
+              title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+            >
+              {showPassword ? "Ocultar" : "Mostrar"}
+            </button>
+          </div>
           {error && (
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
           )}

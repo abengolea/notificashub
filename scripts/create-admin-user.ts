@@ -33,6 +33,12 @@ async function main() {
     (process.env.GOOGLE_APPLICATION_CREDENTIALS && existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) ||
     (!process.env.GOOGLE_APPLICATION_CREDENTIALS && existsSync(credentialsPath));
 
+  // Si GOOGLE_APPLICATION_CREDENTIALS apunta a un archivo que no existe,
+  // borrarlo para que firebase-admin use gcloud ADC en su lugar
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  }
+
   if (getApps().length === 0) {
     if (hasCredentialsFile) {
       const pathToUse = process.env.GOOGLE_APPLICATION_CREDENTIALS ?? credentialsPath;

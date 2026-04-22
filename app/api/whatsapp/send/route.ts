@@ -4,8 +4,8 @@
  * Endpoint para que los tenants (Náutica, HeartLink, etc.) envíen mensajes
  * al usuario por WhatsApp. Usa la API de Meta del número de NotificasHub.
  *
- * Body: { to: string, text: string, tenantId?: string }
- * Header: x-internal-token (internalSecret del tenant)
+ * Body: { to: string, text?: string, template?: { name, language: { code }, components? }, tenantId? }
+ * Header: x-internal-token o x-internal-secret (internalSecret del tenant)
  *
  * Valida que el token coincida con el internalSecret del tenant.
  * Si tenantId no se envía, busca un tenant cuyo internalSecret coincida.
@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase-admin";
 import { getTenantInfo } from "@/src/whatsapp/tenants";
-import { sendText } from "@/src/whatsapp/sender";
+import { sendText, sendTemplate, type WhatsAppTemplateBody } from "@/src/whatsapp/sender";
 
 const HEADER_TOKEN = "x-internal-token";
 
@@ -22,7 +22,10 @@ function badRequest(message: string) {
 }
 
 function unauthorized() {
-  return NextResponse.json({ error: "Invalid or missing x-internal-token" }, { status: 401 });
+  return NextResponse.json(
+    { error: "Invalid or missing x-internal-token / x-internal-secret" },
+    { status: 401 }
+  );
 }
 
 function normalizePhone(phone: string): string {
@@ -56,13 +59,29 @@ export async function POST(req: NextRequest) {
 
   const to = (body.to ?? body.phone ?? body.from) as string | undefined;
   const text = (body.text ?? body.message) as string | undefined;
-  let tenantId = (body.tenantId ?? body.tenant_id) as string | undefined;
+  const templateRaw = body.template as Record<string, unknown> | undefined;
+  const template: WhatsAppTemplateBody | null =
+    templateRaw &&
+    typeof templateRaw.name === "string" &&
+    templateRaw.language &&
+    typeof (templateRaw.language as { code?: string }).code === "string"
+      ? {
+          name: templateRaw.name,
+          language: { code: (templateRaw.language as { code: string }).code },
+          components: Array.isArray(templateRaw.components) ? templateRaw.components : undefined,
+        }
+      : null;
+
+  let tenantId =
+    ((body.tenantId ?? body.tenant_id) as string | undefined)?.trim() ||
+    req.headers.get("x-tenant-id")?.trim() ||
+    undefined;
 
   if (!to || typeof to !== "string") {
     return badRequest("to (or phone/from) is required");
   }
-  if (!text || typeof text !== "string") {
-    return badRequest("text (or message) is required");
+  if (!template && (!text || typeof text !== "string")) {
+    return badRequest("text (or message) or template { name, language: { code } } is required");
   }
 
   if (!tenantId) {
@@ -78,7 +97,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const phone = normalizePhone(to);
-    await sendText(phone, text);
+    if (template) {
+      await sendTemplate(phone, template);
+    } else {
+      await sendText(phone, text!);
+    }
     return NextResponse.json({ ok: true, sent: true });
   } catch (err) {
     console.error("[whatsapp/send]", err);

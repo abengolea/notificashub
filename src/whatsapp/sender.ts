@@ -41,6 +41,46 @@ export async function sendText(phone: string, text: string): Promise<void> {
   }
 }
 
+/** Plantilla aprobada en Meta (Cloud API). */
+export interface WhatsAppTemplateBody {
+  name: string;
+  language: { code: string };
+  components?: unknown[];
+}
+
+export async function sendTemplate(phone: string, template: WhatsAppTemplateBody): Promise<void> {
+  const { phoneNumberId, accessToken } = getConfig();
+  const url = `${GRAPH_API}/${phoneNumberId}/messages`;
+
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: phone.replace(/\D/g, ""),
+    type: "template",
+    template: {
+      name: template.name,
+      language: template.language,
+      ...(template.components && template.components.length > 0
+        ? { components: template.components }
+        : {}),
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const textErr = await res.text();
+    throw new Error(`WhatsApp API error ${res.status}: ${textErr}`);
+  }
+}
+
 /**
  * Envía lista interactiva (hasta 10 opciones). Para 2 opciones usa botones.
  */

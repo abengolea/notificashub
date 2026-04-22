@@ -12,7 +12,17 @@
     "register-user": "tsx scripts/register-user.ts",
     "create-admin-user": "tsx scripts/create-admin-user.ts",
     "migrate-users": "tsx scripts/migrate-users-to-notificashub.ts",
-    "update-whatsapp-profile": "tsx scripts/update-whatsapp-profile.ts"
+    "cleanup-legacy-last-tenant": "tsx scripts/cleanup-legacy-last-tenant.ts",
+    "force-ask-choice": "tsx scripts/force-ask-choice.ts",
+    "debug-phone": "tsx scripts/debug-phone.ts",
+    "setup-tenant-nautica": "tsx scripts/setup-tenant-nautica.ts",
+    "add-user-to-tenants": "tsx scripts/add-user-to-tenants.ts",
+    "setup-nautica-definitivo": "tsx scripts/setup-nautica-definitivo.ts",
+    "verificar-setup": "tsx scripts/verificar-setup.ts",
+    "setup-tenant-regatas": "tsx scripts/setup-tenant-regatas.ts",
+    "setup-tenant-planesdeahorro": "tsx scripts/setup-tenant-planesdeahorro.ts",
+    "update-whatsapp-profile": "tsx scripts/update-whatsapp-profile.ts",
+    "set-whatsapp-token": "tsx scripts/set-whatsapp-token.ts"
   },
   "dependencies": {
     "firebase": "^12.10.0",

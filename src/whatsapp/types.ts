@@ -54,6 +54,10 @@ export interface TenantDoc {
   referralTokens?: string[];
   webhookUrl?: string;
   internalSecret?: string;
+  /** Header al reenviar al webhook del tenant (default: x-internal-token). Regatas+ usa x-internal-secret */
+  internalAuthHeader?: string;
+  /** meta: payload actual compatible con Nautic/HeartLink. regatas_plus: contrato Regatas+ (phone, tenantId, waMessageId, message) */
+  webhookPayloadFormat?: "meta" | "regatas_plus";
 }
 
 export interface UserMembershipDoc {

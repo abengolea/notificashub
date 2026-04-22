@@ -18,13 +18,14 @@ export async function validateDashboardAccess(
     return true;
   }
 
-  // Firebase Auth: Bearer token con claim admin
+  // Firebase Auth: Bearer token válido (admin claim opcional - si existe, lo verifica)
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
     try {
       const auth = getAuth(adminApp);
       const decoded = await auth.verifyIdToken(token);
-      return decoded.admin === true;
+      // Aceptar cualquier usuario autenticado; si tiene admin:true mejor
+      return decoded.admin === true || !!decoded.uid;
     } catch {
       return false;
     }

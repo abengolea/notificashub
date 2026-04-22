@@ -1,5 +1,11 @@
 /**
- * Algoritmo resolveTenant: determina a qué tenant enrutar el mensaje
+ * Algoritmo resolveTenant: determina a qué tenant enrutar el mensaje.
+ *
+ * Cada producto (p. ej. planesdeahorro) se configura en Firestore: doc `tenants/{tenantId}`
+ * con `referralTokens`, `webhookUrl`, `internalSecret`, `webhookPayloadFormat`.
+ * Los usuarios suelen tener ese `tenantId` en `user_memberships`.
+ * Si no hay membresía y existe env `DEFAULT_INBOUND_TENANT_ID`, se enruta ahí (p. ej. primer contacto sin registro previo).
+ * Deep link típico: `wa.me/<número_hub>?text=PLANES` o `PLANESDEAHORRO` si esos tokens están en el tenant.
  */
 import type { Firestore } from "firebase-admin/firestore";
 import type { IncomingMessage, ResolveAction, TenantOption } from "./types";
@@ -80,6 +86,11 @@ export async function resolveTenantForIncomingMessage(
   const membership = await getMemberships(db, phone);
 
   if (!membership || !membership.tenantIds?.length) {
+    const fallbackTenant = process.env.DEFAULT_INBOUND_TENANT_ID?.trim();
+    if (fallbackTenant) {
+      console.log("[NotificasHub] Sin membresía → DEFAULT_INBOUND_TENANT_ID:", fallbackTenant);
+      return { action: "route", tenantId: fallbackTenant };
+    }
     return { action: "silent_unregistered" };
   }
 

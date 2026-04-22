@@ -35,6 +35,8 @@ export interface TenantInfo {
   referralTokens: string[];
   webhookUrl?: string;
   internalSecret?: string;
+  internalAuthHeader?: string;
+  webhookPayloadFormat?: "meta" | "regatas_plus";
 }
 
 /**
@@ -53,6 +55,8 @@ export async function getTenantInfo(
       referralTokens: d.referralTokens ?? [],
       webhookUrl: d.webhookUrl,
       internalSecret: d.internalSecret,
+      internalAuthHeader: d.internalAuthHeader,
+      webhookPayloadFormat: d.webhookPayloadFormat,
     };
   }
 

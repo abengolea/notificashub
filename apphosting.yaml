@@ -30,5 +30,10 @@ env:
     value: heartlink_internal_2026
     availability:
       - RUNTIME
+  # Sin user_memberships → enrutar a Planes de ahorro (primer contacto)
+  - variable: DEFAULT_INBOUND_TENANT_ID
+    value: planesdeahorro
+    availability:
+      - RUNTIME
   - variable: NOTIFICASHUB_URL
     secret: NOTIFICASHUB_URL
