@@ -283,9 +283,34 @@ export async function processInbound(
                 body: forwardBody,
               });
               if (!res.ok) {
-                const text = await res.text();
-                console.error("[msg] processing-error", { id: messageId, type: message.type, step: "tenant-post", error: `${res.status} ${text.slice(0, 100)}`, tenantId: resolveResult.tenantId });
-                result.errors.push(`tenant ${resolveResult.tenantId}: ${res.status} ${text}`);
+                // 404 → tenant rechazó al usuario (no registrado). Reintentar con DEFAULT_INBOUND_TENANT_ID.
+                if (res.status === 404) {
+                  const defaultTenantId = process.env.DEFAULT_INBOUND_TENANT_ID?.trim();
+                  if (defaultTenantId && defaultTenantId !== resolveResult.tenantId) {
+                    const defaultTenant = await getTenantInfo(db, defaultTenantId);
+                    if (defaultTenant?.webhookUrl && defaultTenant.internalSecret) {
+                      const defaultAuthHeader = defaultTenant.internalAuthHeader?.trim() || "x-internal-token";
+                      const retryRes = await fetch(defaultTenant.webhookUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", [defaultAuthHeader]: defaultTenant.internalSecret },
+                        body: JSON.stringify({ ...basePayload, tenantId: defaultTenantId }),
+                      });
+                      if (retryRes.ok) {
+                        console.log("[NotificasHub] → fallback a DEFAULT_INBOUND_TENANT_ID:", defaultTenantId, "desde:", resolveResult.tenantId);
+                        forwarded = true;
+                      } else {
+                        const retryText = await retryRes.text();
+                        console.error("[msg] processing-error", { id: messageId, step: "tenant-post-fallback", error: `${retryRes.status} ${retryText.slice(0, 100)}`, tenantId: defaultTenantId });
+                        result.errors.push(`fallback tenant ${defaultTenantId}: ${retryRes.status}`);
+                      }
+                    }
+                  }
+                }
+                if (!forwarded) {
+                  const text = await res.text();
+                  console.error("[msg] processing-error", { id: messageId, type: message.type, step: "tenant-post", error: `${res.status} ${text.slice(0, 100)}`, tenantId: resolveResult.tenantId });
+                  result.errors.push(`tenant ${resolveResult.tenantId}: ${res.status} ${text}`);
+                }
               } else {
                 if (isImageType) console.log("[msg] tenant-post-ok", { id: messageId, tenantId: resolveResult.tenantId });
                 forwarded = true;
