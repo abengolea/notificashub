@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.claude/
 
 # Firebase Admin SDK (clave privada - NUNCA subir)
 *-firebase-adminsdk-*.json

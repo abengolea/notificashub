@@ -1,4 +1,4 @@
-# NotificasHub
+  # NotificasHub
 
 Hub central para WhatsApp Cloud API (Meta) con soporte **multi-tenant**. Enruta mensajes entrantes al tenant correcto según membresías, referral tokens y preferencias del usuario.
 

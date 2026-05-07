@@ -42,7 +42,15 @@ function getAdminApp(): App {
 }
 
 export const adminApp = getAdminApp();
+
+// HMR/Turbopack reevalúan este módulo en el mismo proceso; getFirestore devuelve la misma instancia y
+// settings() solo puede llamarse una vez (antes del primer uso del cliente Firestore).
+const firestoreGlobals = globalThis as typeof globalThis & {
+  __NOTIFICAS_HUB_FIRESTORE_SETTINGS__?: true;
+};
 const firestore = getFirestore(adminApp);
-// Meta puede enviar conversationId: undefined en payloads; Firestore lo rechaza por defecto
-firestore.settings({ ignoreUndefinedProperties: true });
+if (!firestoreGlobals.__NOTIFICAS_HUB_FIRESTORE_SETTINGS__) {
+  firestore.settings({ ignoreUndefinedProperties: true });
+  firestoreGlobals.__NOTIFICAS_HUB_FIRESTORE_SETTINGS__ = true;
+}
 export const db: Firestore = firestore;
