@@ -15,9 +15,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
-      - run: npm ci && npm run build
+      - name: npm ci
+        run: npm ci
+      - name: npm run build
+        run: npm run build
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
       - uses: FirebaseExtended/action-hosting-deploy@v0
