@@ -1,20 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { DASHBOARD_TOKEN_STORAGE_KEY } from "@/lib/dashboard-session";
 import { FacturacionPanel } from "@/app/admin/facturacion/facturacion-panel";
 
+function tokenSubscribe() {
+  return () => {};
+}
+
+function tokenSnapshot() {
+  return sessionStorage.getItem(DASHBOARD_TOKEN_STORAGE_KEY);
+}
+
+function tokenServerSnapshot() {
+  return null;
+}
+
 export default function FacturacionPage() {
-  const [token, setToken] = useState<string | null>(null);
+  const token = useSyncExternalStore(tokenSubscribe, tokenSnapshot, tokenServerSnapshot);
 
   const authHeader = useMemo((): HeadersInit => {
     return token ? ({ Authorization: `Bearer ${token}` } as HeadersInit) : {};
   }, [token]);
-
-  useEffect(() => {
-    setToken(sessionStorage.getItem(DASHBOARD_TOKEN_STORAGE_KEY));
-  }, []);
 
   if (!token) {
     return (

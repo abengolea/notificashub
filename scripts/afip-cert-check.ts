@@ -9,7 +9,6 @@ import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { loadAfipIntegrationEnv } from "../lib/afip/env";
-import { envTrimmedKey } from "../lib/env-trim-key";
 import { resolveOpenSslForAfip } from "../lib/afip/openssl";
 
 const root = process.cwd();
