@@ -6,11 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:firebase-secret": "node scripts/check-notificas-firebase-secret.mjs",
+    "diagnose:whatsapp-webhook": "node scripts/diagnose-whatsapp-webhook.mjs",
+    "verify:whatsapp-flow": "tsx scripts/verify-whatsapp-flow.ts"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
     "firebase": "^12.10.0",
-    "firebase-admin": "^13.7.0",
+    "firebase-admin": "^13.10.0",
+    "google-logging-utils": "1.1.2",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
@@ -23,6 +28,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.22.0",
     "typescript": "^5"
   }
 }
