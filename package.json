@@ -7,15 +7,33 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "check:firebase-secret": "node scripts/check-notificas-firebase-secret.mjs",
-    "diagnose:whatsapp-webhook": "node scripts/diagnose-whatsapp-webhook.mjs",
-    "verify:whatsapp-flow": "tsx scripts/verify-whatsapp-flow.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "register-user": "tsx scripts/register-user.ts",
+    "create-admin-user": "tsx scripts/create-admin-user.ts",
+    "migrate-users": "tsx scripts/migrate-users-to-notificashub.ts",
+    "cleanup-legacy-last-tenant": "tsx scripts/cleanup-legacy-last-tenant.ts",
+    "force-ask-choice": "tsx scripts/force-ask-choice.ts",
+    "debug-phone": "tsx scripts/debug-phone.ts",
+    "setup-tenant-nautica": "tsx scripts/setup-tenant-nautica.ts",
+    "add-user-to-tenants": "tsx scripts/add-user-to-tenants.ts",
+    "setup-nautica-definitivo": "tsx scripts/setup-nautica-definitivo.ts",
+    "verificar-setup": "tsx scripts/verificar-setup.ts",
+    "setup-tenant-regatas": "tsx scripts/setup-tenant-regatas.ts",
+    "setup-tenant-planesdeahorro": "tsx scripts/setup-tenant-planesdeahorro.ts",
+    "update-whatsapp-profile": "tsx scripts/update-whatsapp-profile.ts",
+    "set-whatsapp-token": "tsx scripts/set-whatsapp-token.ts",
+    "afip:ping": "tsx scripts/afip-ping.ts",
+    "afip:cert-check": "tsx scripts/afip-cert-check.ts",
+    "afip:folder-scan": "tsx scripts/afip-folder-scan.ts"
   },
   "dependencies": {
-    "@opentelemetry/api": "1.9.1",
+    "@afipsdk/afip.js": "^1.2.3",
+    "fast-xml-parser": "^5.7.3",
     "firebase": "^12.10.0",
     "firebase-admin": "^13.10.0",
-    "google-logging-utils": "1.1.2",
+    "jszip": "^3.10.1",
     "next": "16.1.6",
     "nodemailer": "^8.0.7",
     "openai": "^6.36.0",
@@ -36,6 +54,7 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "tsx": "^4.22.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

@@ -1,6 +1,10 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+
+const HUB_PROJECT_ID =
+  process.env.NOTIFICASHUB_PROJECT_ID?.trim() ?? "studio-3864746689-59018";
 
 /** App Admin nombrada: Firestore de Notificas cuando Hub vive en otro proyecto Firebase. */
 const NOTIFICAS_ADMIN_APP_NAME = "notificas-mail-webhook";
@@ -39,6 +43,22 @@ export function getAdminApp(): App {
   if (credentialsPath) {
     return initializeApp({
       credential: cert(credentialsPath),
+    });
+  }
+
+  const altLocalJson = path.join(
+    process.cwd(),
+    `${HUB_PROJECT_ID}-firebase-adminsdk-fbsvc-5cdc673866.json`
+  );
+  if (existsSync(altLocalJson)) {
+    const storageBucket =
+      process.env.FIREBASE_STORAGE_BUCKET ||
+      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+      `${HUB_PROJECT_ID}.appspot.com`;
+    return initializeApp({
+      credential: cert(altLocalJson),
+      projectId: HUB_PROJECT_ID,
+      storageBucket,
     });
   }
 
@@ -108,3 +128,19 @@ export function getFirestoreForWhatsappMail(): Firestore {
   }
   return getFirestore(getAdminApp());
 }
+
+/** App Hub por defecto (contabilidad, billing, etc.). */
+export const adminApp = getAdminApp();
+
+const firestoreGlobals = globalThis as typeof globalThis & {
+  __NOTIFICAS_HUB_FIRESTORE_SETTINGS__?: true;
+};
+
+const hubFirestore = getFirestore(adminApp);
+if (!firestoreGlobals.__NOTIFICAS_HUB_FIRESTORE_SETTINGS__) {
+  hubFirestore.settings({ ignoreUndefinedProperties: true });
+  firestoreGlobals.__NOTIFICAS_HUB_FIRESTORE_SETTINGS__ = true;
+}
+
+/** Firestore del proyecto Hub. */
+export const db: Firestore = hubFirestore;

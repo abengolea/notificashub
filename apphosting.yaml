@@ -1,3 +1,5 @@
+# App Hosting: runConfig de hoy (master) + env de la app completa (main) + secretos NOTIFICAS_*
+
 runConfig:
   cpu: 1
   memoryMiB: 512
@@ -7,15 +9,56 @@ runConfig:
 env:
   - variable: NOTIFICAS_FIREBASE_PROJECT_ID
     secret: NOTIFICAS_FIREBASE_PROJECT_ID
+    availability:
+      - RUNTIME
 
   - variable: NOTIFICAS_FIREBASE_CLIENT_EMAIL
     secret: NOTIFICAS_FIREBASE_CLIENT_EMAIL
+    availability:
+      - RUNTIME
 
   - variable: NOTIFICAS_FIREBASE_PRIVATE_KEY
     secret: NOTIFICAS_FIREBASE_PRIVATE_KEY
-
-  - variable: WHATSAPP_VERIFY_TOKEN
-    secret: WHATSAPP_VERIFY_TOKEN
+    availability:
+      - RUNTIME
 
   - variable: NOTIFICASHUB_PROJECT_ID
     value: studio-3864746689-59018
+    availability:
+      - RUNTIME
+
+  - variable: WHATSAPP_VERIFY_TOKEN
+    secret: WHATSAPP_VERIFY_TOKEN
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # WhatsApp Cloud API: requerido para enviar mensajes (ask_choice, respuestas)
+  - variable: WHATSAPP_PHONE_NUMBER_ID
+    value: "693302653873170"
+    availability:
+      - RUNTIME
+
+  - variable: WHATSAPP_ACCESS_TOKEN
+    secret: whatsapp-access-token
+    availability:
+      - RUNTIME
+
+  - variable: HEARTLINK_URL
+    value: https://heartlink--heartlink-f4ftq.us-central1.hosted.app
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: INTERNAL_SECRET
+    value: heartlink_internal_2026
+    availability:
+      - RUNTIME
+
+  - variable: DEFAULT_INBOUND_TENANT_ID
+    value: planesdeahorro
+    availability:
+      - RUNTIME
+
+  - variable: NOTIFICASHUB_URL
+    secret: NOTIFICASHUB_URL
