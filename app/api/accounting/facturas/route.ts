@@ -1,0 +1,116 @@
+import { NextRequest, NextResponse } from "next/server";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { db } from "@/lib/firebase-admin";
+import { requireDashboard } from "@/lib/require-dashboard";
+import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
+import { facturaBodySchema } from "@/lib/accounting/schemas";
+import { toIso } from "@/lib/accounting/serialize";
+
+function parseYearMonth(searchParams: URLSearchParams): {
+  start: Timestamp;
+  end: Timestamp;
+} | null {
+  const y = searchParams.get("year");
+  const m = searchParams.get("month");
+  if (!y || !m) return null;
+  const year = parseInt(y, 10);
+  const month = parseInt(m, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return null;
+  }
+  const startD = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+  const endD = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+  return { start: Timestamp.fromDate(startD), end: Timestamp.fromDate(endD) };
+}
+
+export async function GET(req: NextRequest) {
+  const denied = await requireDashboard(req);
+  if (denied) return denied;
+
+  const bounds = parseYearMonth(new URL(req.url).searchParams);
+  const col = db.collection(ACCOUNTING_COLLECTIONS.facturas);
+
+  try {
+    const snap =
+      bounds != null
+        ? await col
+            .where("fecha", ">=", bounds.start)
+            .where("fecha", "<=", bounds.end)
+            .orderBy("fecha", "desc")
+            .limit(500)
+            .get()
+        : await col.orderBy("fecha", "desc").limit(200).get();
+
+    const items = snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        tipo: d.tipo,
+        numero: d.numero,
+        puntoVenta: d.puntoVenta ?? "",
+        fecha: toIso(d.fecha),
+        razonsocial: d.razonsocial ?? "",
+        cuit: d.cuit ?? "",
+        tipoComprobante: d.tipoComprobante ?? "",
+        netoGravado: d.netoGravado ?? 0,
+        iva: d.iva ?? 0,
+        otrosImpuestos: d.otrosImpuestos ?? 0,
+        total: d.total ?? 0,
+        observaciones: d.observaciones ?? "",
+        billingRecurrenteKey: d.billingRecurrenteKey ?? "",
+        updatedAt: toIso(d.updatedAt),
+      };
+    });
+
+    return NextResponse.json({ facturas: items });
+  } catch (e) {
+    console.error("[accounting/facturas GET]", e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const denied = await requireDashboard(req);
+  if (denied) return denied;
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
+  const parsed = facturaBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Validación fallida", details: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const b = parsed.data;
+  try {
+    const fechaTs = Timestamp.fromDate(dateOnlyToUtcMidday(b.fecha));
+    const ref = await db.collection(ACCOUNTING_COLLECTIONS.facturas).add({
+      empresa: "notificas_srl",
+      tipo: b.tipo,
+      numero: b.numero,
+      puntoVenta: b.puntoVenta ?? null,
+      fecha: fechaTs,
+      razonsocial: b.razonsocial,
+      cuit: b.cuit ?? null,
+      tipoComprobante: b.tipoComprobante ?? null,
+      netoGravado: b.netoGravado,
+      iva: b.iva,
+      otrosImpuestos: b.otrosImpuestos ?? 0,
+      total: b.total,
+      observaciones: b.observaciones ?? null,
+      billingRecurrenteKey: b.billingRecurrenteKey ?? null,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return NextResponse.json({ id: ref.id }, { status: 201 });
+  } catch (e) {
+    console.error("[accounting/facturas POST]", e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
