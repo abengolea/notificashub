@@ -305,7 +305,8 @@ export async function feCAESolicitar(
   const caeFchVto = findDeep(parsed, "CAEFchVto");
   const cbteDesdeRaw = findDeep(parsed, "CbteDesde");
 
-  if (typeof cae !== "string" || !cae) {
+  const caeStr = typeof cae === "string" ? cae : String(cae ?? "");
+  if (!caeStr) {
     return { ok: false, errors: [], rawHint: text.slice(0, 600) };
   }
 
@@ -317,9 +318,79 @@ export async function feCAESolicitar(
   return {
     ok: true,
     data: {
-      cae,
+      cae: caeStr,
       caeFchVto: typeof caeFchVto === "string" ? caeFchVto : String(caeFchVto ?? ""),
       voucherNumber,
+    },
+  };
+}
+
+/** FECompConsultar — recupera datos de un comprobante ya autorizado. */
+export async function feCompConsultar(
+  env: AfipIntegrationEnv,
+  ta: WsaaCredentials,
+  ptoVta: number,
+  cbteTipo: number,
+  cbteNro: number,
+): Promise<FeWsfeResult<FeCaeResult & { resultado?: string; impTotal?: number }>> {
+  debugTA(ta.token);
+  const esc = escapeXmlText;
+  const soap = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">
+  <soap:Body>
+    <ar:FECompConsultar>
+      <ar:Auth>
+        <ar:Token>${esc(ta.token)}</ar:Token>
+        <ar:Sign>${esc(ta.sign)}</ar:Sign>
+        <ar:Cuit>${env.cuitNumeric}</ar:Cuit>
+      </ar:Auth>
+      <ar:FeCompConsReq>
+        <ar:CbteTipo>${cbteTipo}</ar:CbteTipo>
+        <ar:CbteNro>${cbteNro}</ar:CbteNro>
+        <ar:PtoVta>${ptoVta}</ar:PtoVta>
+      </ar:FeCompConsReq>
+    </ar:FECompConsultar>
+  </soap:Body>
+</soap:Envelope>`;
+
+  const url = afipWsfeUrl(env.production);
+  let text: string;
+  try {
+    text = await postSoap(url, "http://ar.gov.afip.dif.FEV1/FECompConsultar", soap);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, errors: [{ code: "FETCH", msg }] };
+  }
+
+  const parsed = parser.parse(text) as Record<string, unknown>;
+  const fault = findDeep(parsed, "Fault");
+  if (fault !== undefined) {
+    return { ok: false, errors: [{ code: "SOAP", msg: JSON.stringify(fault).slice(0, 400) }] };
+  }
+
+  const errs = extractErrors(parsed);
+  if (errs.length > 0) {
+    return { ok: false, errors: errs };
+  }
+
+  const cae = String(findDeep(parsed, "CodAutorizacion") ?? findDeep(parsed, "CAE") ?? "");
+  if (!cae) {
+    return { ok: false, errors: [], rawHint: text.slice(0, 900) };
+  }
+
+  const caeFchVto = String(findDeep(parsed, "FchVto") ?? findDeep(parsed, "CAEFchVto") ?? "");
+  const impTotalRaw = findDeep(parsed, "ImpTotal");
+  const impTotal =
+    typeof impTotalRaw === "number" ? impTotalRaw : Number(String(impTotalRaw ?? "NaN"));
+
+  return {
+    ok: true,
+    data: {
+      cae,
+      caeFchVto,
+      voucherNumber: cbteNro,
+      resultado: String(findDeep(parsed, "Resultado") ?? ""),
+      impTotal: Number.isFinite(impTotal) ? impTotal : undefined,
     },
   };
 }
