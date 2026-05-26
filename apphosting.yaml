@@ -58,6 +58,21 @@ env:
     availability:
       - RUNTIME
 
+  - variable: AFIP_CERT_PEM
+    secret: AFIP_CERT_PEM
+    availability:
+      - RUNTIME
+
+  - variable: AFIP_KEY_PEM
+    secret: AFIP_KEY_PEM
+    availability:
+      - RUNTIME
+
+  - variable: AFIP_CHAIN_PEM
+    secret: AFIP_CHAIN_PEM
+    availability:
+      - RUNTIME
+
   - variable: AFIP_CERT_PATH
     secret: AFIP_CERT_PATH
     availability:
