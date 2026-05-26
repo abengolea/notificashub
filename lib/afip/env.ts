@@ -1,4 +1,5 @@
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { envTrimmedKey, normalizeAfipSdkAccessToken } from "@/lib/env-trim-key";
 import { getAfipPtoVtaDefaultFromEnv } from "@/lib/afip/issuer-env";
@@ -69,6 +70,17 @@ function buildCertPem(certResolved: string, chainResolved: string | undefined): 
   return certPem;
 }
 
+function normalizePem(raw: string): string {
+  const pem = raw.replace(/\\n/g, "\n").trim();
+  return pem.endsWith("\n") ? pem : `${pem}\n`;
+}
+
+function writeSecretPem(workDir: string, filename: string, rawPem: string): string {
+  const outPath = path.join(workDir, filename);
+  writeFileSync(outPath, normalizePem(rawPem), { encoding: "utf8", mode: 0o600 });
+  return outPath;
+}
+
 /**
  * Configuración central AFIP (.env + archivos).
  * No loguea secretos.
@@ -81,28 +93,60 @@ export function loadAfipIntegrationEnv(): AfipIntegrationEnv | { error: string }
 
   const prodRaw = (envTrimmedKey("AFIP_PRODUCTION") ?? "").toLowerCase();
   const production = prodRaw === "1" || prodRaw === "true";
+  const workDirRaw = envTrimmedKey("AFIP_WORK_DIR");
+  const workDir = workDirRaw
+    ? path.resolve(workDirRaw)
+    : path.join(os.tmpdir(), "notificashub-afip-cache");
+  try {
+    mkdirSync(workDir, { recursive: true });
+  } catch {
+    return { error: `No se pudo crear/usar AFIP_WORK_DIR: ${workDir}` };
+  }
 
+  const certPemSecret = envTrimmedKey("AFIP_CERT_PEM");
+  const keyPemSecret = envTrimmedKey("AFIP_KEY_PEM");
+  const chainPemSecret = envTrimmedKey("AFIP_CHAIN_PEM");
   const certPathRaw = envTrimmedKey("AFIP_CERT_PATH");
   const keyPathRaw = envTrimmedKey("AFIP_KEY_PATH");
-  if (!certPathRaw || !keyPathRaw) {
+  if ((!certPemSecret || !keyPemSecret) && (!certPathRaw || !keyPathRaw)) {
     return {
       error:
-        "Definí AFIP_CERT_PATH y AFIP_KEY_PATH apuntando a tus archivos .crt y .key (fuera del repo).",
+        "Definí AFIP_CERT_PEM y AFIP_KEY_PEM como secrets, o AFIP_CERT_PATH y AFIP_KEY_PATH apuntando a archivos .crt/.key.",
     };
   }
 
-  const certResolved = path.resolve(certPathRaw);
-  const keyResolved = path.resolve(keyPathRaw);
-  if (!existsSync(certResolved) || !existsSync(keyResolved)) {
-    return {
-      error: `No se encontró certificado o clave: cert=${certResolved} | key=${keyResolved}`,
-    };
-  }
+  let certResolved: string;
+  let keyResolved: string;
+  let chainResolved: string | undefined;
+  let certPem: string;
+  let keyPem: string;
 
-  const chainRaw = envTrimmedKey("AFIP_CHAIN_PATH");
-  const chainResolved = chainRaw ? path.resolve(chainRaw) : undefined;
-  if (chainResolved && !existsSync(chainResolved)) {
-    return { error: `AFIP_CHAIN_PATH no existe: ${chainResolved}` };
+  if (certPemSecret && keyPemSecret) {
+    certResolved = writeSecretPem(workDir, "afip_cert.pem", certPemSecret);
+    keyResolved = writeSecretPem(workDir, "afip_key.pem", keyPemSecret);
+    if (chainPemSecret) {
+      chainResolved = writeSecretPem(workDir, "afip_chain.pem", chainPemSecret);
+    }
+    certPem = chainPemSecret
+      ? `${normalizePem(certPemSecret).trimEnd()}\n${normalizePem(chainPemSecret).trim()}`
+      : normalizePem(certPemSecret).trimEnd();
+    keyPem = normalizePem(keyPemSecret);
+  } else {
+    certResolved = path.resolve(certPathRaw!);
+    keyResolved = path.resolve(keyPathRaw!);
+    if (!existsSync(certResolved) || !existsSync(keyResolved)) {
+      return {
+        error: `No se encontró certificado o clave: cert=${certResolved} | key=${keyResolved}`,
+      };
+    }
+
+    const chainRaw = envTrimmedKey("AFIP_CHAIN_PATH");
+    chainResolved = chainRaw ? path.resolve(chainRaw) : undefined;
+    if (chainResolved && !existsSync(chainResolved)) {
+      return { error: `AFIP_CHAIN_PATH no existe: ${chainResolved}` };
+    }
+    certPem = buildCertPem(certResolved, chainResolved);
+    keyPem = readFileSync(keyResolved, "utf8");
   }
 
   const warnings: string[] = [];
@@ -121,18 +165,8 @@ export function loadAfipIntegrationEnv(): AfipIntegrationEnv | { error: string }
     }
   }
 
-  const workDirRaw = envTrimmedKey("AFIP_WORK_DIR");
-  const workDir = workDirRaw ? path.resolve(workDirRaw) : path.resolve(process.cwd(), ".afip-cache");
-  try {
-    mkdirSync(workDir, { recursive: true });
-  } catch {
-    return { error: `No se pudo crear/usar AFIP_WORK_DIR: ${workDir}` };
-  }
-
   const opensslPath = envTrimmedKey("OPENSSL_PATH");
 
-  const certPem = buildCertPem(certResolved, chainResolved);
-  const keyPem = readFileSync(keyResolved, "utf8");
   const { token: accessToken, envKey: accessTokenEnvKey } = resolveAfipSdkAccessTokenFromEnv();
   const ptoVtaDefault = getAfipPtoVtaDefaultFromEnv();
 
