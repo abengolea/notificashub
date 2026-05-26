@@ -48,6 +48,8 @@ export async function GET(req: NextRequest) {
         facturaId: d.facturaId ?? "",
         observaciones: d.observaciones ?? "",
         mercadopagoPaymentId: d.mercadopagoPaymentId ? String(d.mercadopagoPaymentId) : "",
+        bankReference: d.bankReference ? String(d.bankReference) : "",
+        bankReferencia: d.bankReferencia ? String(d.bankReferencia) : "",
       };
     });
 

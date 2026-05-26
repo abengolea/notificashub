@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArcaTab, ContabTabBar, TabPageIntro, type TabId } from "./contabilidad-shell";
+import { periodLabel as formatPeriodLabel } from "./contabilidad-tabs";
 import { DASHBOARD_TOKEN_STORAGE_KEY } from "@/lib/dashboard-session";
 import { fechaFieldToUi } from "@/lib/accounting/serialize";
 
@@ -39,7 +41,47 @@ function money(n: number): string {
   });
 }
 
-type TabId = "resumen" | "facturas" | "cobros" | "pagos";
+function periodLabel(month: string, year: string): string {
+  return formatPeriodLabel(month, year, MONTHS);
+}
+
+function CollapsibleSection(props: {
+  title: string;
+  subtitle?: string;
+  defaultOpen?: boolean;
+  badge?: string;
+  children: ReactNode;
+}) {
+  const { title, subtitle, defaultOpen = false, badge, children } = props;
+  return (
+    <details
+      open={defaultOpen}
+      className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm group"
+    >
+      <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between gap-3 select-none [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
+            {badge ? (
+              <span className="text-[10px] uppercase tracking-wide font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
+                {badge}
+              </span>
+            ) : null}
+          </div>
+          {subtitle ? <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">{subtitle}</p> : null}
+        </div>
+        <span className="shrink-0 text-zinc-400 text-xs group-open:rotate-180 transition-transform">▼</span>
+      </summary>
+      <div className="px-5 pb-5 pt-0 border-t border-zinc-100 dark:border-zinc-700/80">{children}</div>
+    </details>
+  );
+}
+
+function EmptyListHint(props: { message: string }) {
+  return (
+    <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-10 px-4">{props.message}</p>
+  );
+}
 
 function nowPeriod() {
   const d = new Date();
@@ -48,7 +90,7 @@ function nowPeriod() {
 
 export default function ContabilidadPage() {
   const [token, setToken] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabId>("resumen");
+  const [tab, setTab] = useState<TabId>("panel");
   const { year: yNow, month: mNow } = nowPeriod();
   const [year, setYear] = useState(yNow.toString());
   const [month, setMonth] = useState(mNow.toString());
@@ -262,6 +304,19 @@ export default function ContabilidadPage() {
     }
   }, [token, year, month, authHeader]);
 
+  const refreshAll = async () => {
+    await Promise.all([loadResumen(), loadLists()]);
+  };
+
+  const tabCounts = useMemo((): Partial<Record<TabId, number>> => {
+    if (!resumen) return {};
+    return {
+      facturas: Number(resumen.libroFacturasCargadas) || 0,
+      cobros: Number(resumen.cobrosRegistrados) || 0,
+      pagos: Number(resumen.pagosRegistrados) || 0,
+    };
+  }, [resumen]);
+
   useEffect(() => {
     setError(null);
     if (!token) return;
@@ -291,222 +346,264 @@ export default function ContabilidadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <header className="flex flex-wrap gap-4 items-center justify-between mb-8">
+    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-16">
+        <header className="flex flex-wrap gap-4 items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Contabilidad — Notificas SRL</h1>
-            <p className="text-sm text-zinc-500 mt-1">
-              Registro de facturas (compra/venta), cobros y pagos — apoyo orientativo para IVA / Ganancias.
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">Contabilidad</h1>
+            <p className="text-sm text-zinc-500 mt-1">Notificas SRL · movimientos, facturas e IVA orientativo</p>
           </div>
-          <div className="flex flex-wrap gap-4 items-center">
-            <Link href="/admin/facturacion" className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">
-              Clientes y facturación
+          <div className="flex flex-wrap gap-3 items-center text-sm">
+            <Link
+              href="/admin/facturacion"
+              className="rounded-lg border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 font-medium hover:border-emerald-500/50"
+            >
+              Facturación
             </Link>
-            <Link href="/" className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">
-              ← WhatsApp
+            <Link href="/" className="text-emerald-600 hover:text-emerald-700 font-medium px-1">
+              ← Dashboard
             </Link>
           </div>
         </header>
 
-        <div className="flex flex-wrap gap-4 items-end mb-6 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-600 dark:text-zinc-400">Mes</span>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-3 py-2 min-w-[10rem]"
-            >
-              {MONTHS.map((m) => (
-                <option key={m.v} value={m.v}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-600 dark:text-zinc-400">Año</span>
-            <input
-              type="number"
-              min={2020}
-              max={2099}
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-3 py-2 w-28"
-            />
-          </label>
-          {loading && <span className="text-sm text-zinc-500">Cargando…</span>}
-          {error && <span className="text-sm text-red-600 dark:text-red-400">{error}</span>}
+        <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-6 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-700/80 space-y-3">
+          <div className="flex flex-wrap gap-3 items-end justify-between">
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="font-medium text-zinc-500 uppercase tracking-wide">Período</span>
+              <div className="flex gap-2">
+                <select
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm min-w-[9rem]"
+                >
+                  {MONTHS.map((m) => (
+                    <option key={m.v} value={m.v}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={2020}
+                  max={2099}
+                  value={year}
+                  onChange={(e) => setYear(e.target.value)}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm w-24"
+                />
+              </div>
+            </label>
+            {loading ? (
+              <span className="text-xs text-zinc-500 pb-2">Actualizando…</span>
+            ) : (
+              <span className="text-xs text-zinc-500 pb-2 hidden sm:inline">{periodLabel(month, year)}</span>
+            )}
+            {error ? <p className="text-xs text-red-600 dark:text-red-400 max-w-md pb-2">{error}</p> : null}
+          </div>
+          <ContabTabBar
+            tab={tab}
+            setTab={(t) => {
+              setError(null);
+              setTab(t);
+            }}
+            counts={tabCounts}
+          />
         </div>
 
-        <section className="mb-6 space-y-4">
-          <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-5 shadow-sm">
-            <h2 className="text-lg font-semibold mb-2">ARCA — Libro de IVA Digital (export .txt ANSI)</h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-              Descargá un ZIP con los archivos estándar de importación (cabeceras y alícuotas de ventas y compras según AFIP /
-              libro-iva-digital-diseno-registros.pdf), más un CSV/JSON orientativo para control interno de Ganancias. Validá
-              contra IVA Simple antes de cargar masivamente.
-            </p>
-            <div className="flex flex-wrap gap-3 items-center">
-              <button
-                type="button"
-                onClick={() => descargaZipArcaLibro()}
-                disabled={exportingZip}
-                className="rounded-lg bg-slate-800 dark:bg-slate-700 text-white px-4 py-2.5 text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
-              >
-                {exportingZip ? "Generando ZIP…" : `ZIP Libro IVA ARCA (${month}/${year})`}
-              </button>
-              <button
-                type="button"
-                onClick={() => solicitarAlertasEscritorio()}
-                className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-700/60"
-              >
-                Habilitar avisos de escritorio
-              </button>
-            </div>
+        {tab === "panel" && (
+          <div className="space-y-6">
+            {resumen ? (
+              <ResumenBlock data={resumen} moneyFn={money} periodLabel={periodLabel(month, year)} />
+            ) : loading ? (
+              <p className="text-sm text-zinc-500">Cargando resumen…</p>
+            ) : null}
           </div>
-
-          <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-5 shadow-sm">
-            <div className="flex flex-wrap gap-6 items-end">
-              <label className="flex flex-col gap-1 text-sm">
-                Último dígito CUIT (orientativo)
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={ultimoDigitoInput}
-                  onChange={(e) =>
-                    setUltimoDigitoInput(e.target.value.replace(/\D/g, "").slice(0, 1))
-                  }
-                  placeholder="Ej. 3"
-                  className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 w-20"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm flex-1 min-w-[12rem] max-w-xl">
-                CUIT completo (opcional; prioridad sobre dígito)
-                <input
-                  value={cuitCompletoOpcional}
-                  onChange={(e) =>
-                    setCuitCompletoOpcional(e.target.value.replace(/[^\d-]/g, "").slice(0, 13))
-                  }
-                  placeholder="30-xxxxxxxx-x"
-                  className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 font-mono text-xs"
-                />
-              </label>
-              <button
-                type="button"
-                className="text-sm text-emerald-600 hover:underline"
-                onClick={() => loadLibroVencimientos()}
-              >
-                Actualizar panel
-              </button>
-            </div>
-            {libroAviso && (
-              <p className="text-xs text-amber-800 dark:text-amber-100 mt-3 rounded bg-amber-500/10 border border-amber-600/30 p-2">
-                {libroAviso}
-              </p>
-            )}
-            {libroItems.some((i) => i.alertaOrientativa) && (
-              <p className="text-sm mt-3 text-orange-800 dark:text-orange-100 bg-orange-500/15 border border-orange-600/30 rounded px-3 py-2">
-                Hay al menos una fecha de libro IVA cercana o reciente para tu dígito. Confirmá siempre el calendario en ARCA /
-                AFIP.
-              </p>
-            )}
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
-                <thead>
-                  <tr className="text-left border-b border-zinc-200 dark:border-zinc-700 text-zinc-500">
-                    <th className="py-2 px-2">Período fiscal cerrado</th>
-                    <th className="py-2 px-2">Fecha ref. grupo CUIT vs. “Todas”</th>
-                    <th className="py-2 px-2">
-                      Días hacia fecha ref. (−=vencido)
-                      {(ultimoDigitoInput.trim() === "" &&
-                        cuitCompletoOpcional.trim() === "" &&
-                        " · (ingresá dígito o CUIT)") ||
-                        ""}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {libroItems.map((row) => (
-                    <tr
-                      key={`${row.periodo.key}-lib`}
-                      className={`border-b border-zinc-100 dark:border-zinc-700 ${row.alertaOrientativa ? "bg-orange-500/5" : ""}`}
-                    >
-                      <td className="py-2 px-2 font-medium">
-                        {row.periodo.month}/{row.periodo.year}
-                      </td>
-                      <td className="py-2 px-2 font-mono text-xs">
-                        {row.fechaReferenciaOrientativaISO}{" "}
-                        <span className="opacity-60">/</span> g {row.grupoCuilISO} · todas {row.todasISO}
-                      </td>
-                      <td className="py-2 px-2">
-                        {typeof row.diasHastaOrientativo === "number" ? row.diasHastaOrientativo : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <nav className="flex flex-wrap gap-2 mb-6">
-          {(
-            [
-              ["resumen", "Resumen IVA / caja"],
-              ["facturas", "Facturas"],
-              ["cobros", "Cobros"],
-              ["pagos", "Pagos"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setError(null);
-                setTab(id);
-              }}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                tab === id
-                  ? "bg-emerald-600 text-white"
-                  : "bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-600 hover:border-emerald-500/50"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-
-        {tab === "resumen" && resumen && <ResumenBlock data={resumen} moneyFn={money} />}
+        )}
+        {tab === "cobros" && (
+          <CobrosTab authHeader={authHeader} cobros={cobros} onRefresh={loadLists} qh={qh} />
+        )}
+        {tab === "pagos" && <PagosTab authHeader={authHeader} pagos={pagos} onRefresh={loadLists} qh={qh} />}
         {tab === "facturas" && (
           <FacturasTab authHeader={authHeader} facturas={facturas} onRefresh={loadLists} qh={qh} />
         )}
-        {tab === "cobros" && <CobrosTab authHeader={authHeader} cobros={cobros} onRefresh={loadLists} qh={qh} />}
-        {tab === "pagos" && <PagosTab authHeader={authHeader} pagos={pagos} onRefresh={loadLists} qh={qh} />}
+        {tab === "importar" && (
+          <ImportarTab authHeader={authHeader} onDone={refreshAll} onGoTab={setTab} />
+        )}
+        {tab === "arca" && (
+          <ArcaTab
+            month={month}
+            year={year}
+            exportingZip={exportingZip}
+            descargaZipArcaLibro={descargaZipArcaLibro}
+            solicitarAlertasEscritorio={solicitarAlertasEscritorio}
+            ultimoDigitoInput={ultimoDigitoInput}
+            setUltimoDigitoInput={setUltimoDigitoInput}
+            cuitCompletoOpcional={cuitCompletoOpcional}
+            setCuitCompletoOpcional={setCuitCompletoOpcional}
+            loadLibroVencimientos={loadLibroVencimientos}
+            libroAviso={libroAviso}
+            libroItems={libroItems}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function ResumenBlock({ data, moneyFn }: { data: Record<string, unknown>; moneyFn: (n: number) => string }) {
-  const periodo = data.periodo as { year: number; month: number } | undefined;
+function MercadoPagoImportCard(props: {
+  authHeader: HeadersInit;
+  onDone: () => Promise<void>;
+}) {
+  const { authHeader, onDone } = props;
+  const [mpSyncing, setMpSyncing] = useState(false);
+  const [mpRange, setMpRange] = useState({ begin: "", end: "" });
+
+  const syncMercadoPago = async () => {
+    setMpSyncing(true);
+    try {
+      const body =
+        mpRange.begin.trim() && mpRange.end.trim()
+          ? { begin: mpRange.begin.trim(), end: mpRange.end.trim() }
+          : {};
+      const res = await fetch("/api/accounting/mercadopago/sync-cobros", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        alert(String(j.error ?? "Error sincronizando Mercado Pago"));
+        return;
+      }
+      alert(
+        `Mercado Pago: ${Number(j.imported ?? 0)} cobros nuevos · ${Number(j.skippedDuplicates ?? 0)} ya existían.`
+      );
+      await onDone();
+    } finally {
+      setMpSyncing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-6 shadow-sm">
+      <h3 className="font-semibold text-sky-900 dark:text-sky-100 mb-1">Mercado Pago</h3>
+      <p className="text-sm text-sky-800 dark:text-sky-200 mb-4">
+        Importa cobros aprobados. Sin duplicar por id de pago.
+      </p>
+      <div className="flex flex-wrap gap-4 items-end">
+        <label className="flex flex-col gap-1 text-sm">
+          Desde
+          <input
+            type="date"
+            value={mpRange.begin}
+            onChange={(e) => setMpRange((s) => ({ ...s, begin: e.target.value }))}
+            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-800 border-sky-300"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          Hasta
+          <input
+            type="date"
+            value={mpRange.end}
+            onChange={(e) => setMpRange((s) => ({ ...s, end: e.target.value }))}
+            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-800 border-sky-300"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={mpSyncing || Boolean(mpRange.begin) !== Boolean(mpRange.end)}
+          onClick={() => void syncMercadoPago()}
+          className="rounded-lg bg-sky-600 text-white px-5 py-2 font-medium hover:bg-sky-700 disabled:opacity-50"
+        >
+          {mpSyncing ? "Sincronizando…" : "Sincronizar cobros"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ImportarTab(props: {
+  authHeader: HeadersInit;
+  onDone: () => Promise<void>;
+  onGoTab: (t: TabId) => void;
+}) {
+  const { authHeader, onDone, onGoTab } = props;
+  return (
+    <div className="space-y-6">
+      <TabPageIntro
+        title="Importar movimientos"
+        description="Extracto bancario o Mercado Pago. Los PDF de facturas y gastos están en sus pestañas."
+      />
+      <BankExtractCard authHeader={authHeader} onDone={onDone} />
+      <MercadoPagoImportCard authHeader={authHeader} onDone={onDone} />
+      <div className="grid sm:grid-cols-2 gap-4">
+        <button
+          type="button"
+          onClick={() => onGoTab("facturas")}
+          className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-4 text-left hover:border-violet-500/50"
+        >
+          <p className="font-medium text-sm">PDF de facturas</p>
+          <p className="text-xs text-zinc-500 mt-1">Pestaña Facturas</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => onGoTab("pagos")}
+          className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-4 text-left hover:border-violet-500/50"
+        >
+          <p className="font-medium text-sm">PDF de gastos</p>
+          <p className="text-xs text-zinc-500 mt-1">Pestaña Pagos</p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ResumenBlock({
+  data,
+  moneyFn,
+  periodLabel: periodTitle,
+}: {
+  data: Record<string, unknown>;
+  moneyFn: (n: number) => string;
+  periodLabel: string;
+}) {
   const iva = data.iva as Record<string, unknown> | undefined;
   const deb = (iva?.debitoVentas as Record<string, number>) ?? {};
   const cred = (iva?.creditoCompras as Record<string, number>) ?? {};
   const tesoreria = data.tesoreria as Record<string, number> | undefined;
   const avisoLegal = typeof data.avisoLegal === "string" ? data.avisoLegal : "";
+  const diffIva = Number(iva?.diferenciaIVAOrientativa) || 0;
 
   return (
     <div className="space-y-6">
+      <TabPageIntro
+        title={periodTitle}
+        description="Resumen orientativo del mes: IVA según facturas y caja según cobros/pagos registrados."
+      />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">IVA orientativo</p>
+          <p className="text-lg font-bold mt-1 text-amber-700 dark:text-amber-400">{moneyFn(diffIva)}</p>
+        </div>
+        <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">Caja (cobros − pagos)</p>
+          <p className="text-lg font-bold mt-1">{moneyFn(tesoreria?.resultadoCajaOrientativo ?? 0)}</p>
+        </div>
+        <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">Facturas</p>
+          <p className="text-lg font-bold mt-1">{Number(data.libroFacturasCargadas) || 0}</p>
+        </div>
+        <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">Cobros / Pagos</p>
+          <p className="text-sm font-bold mt-1">
+            {Number(data.cobrosRegistrados) || 0} / {Number(data.pagosRegistrados) || 0}
+          </p>
+        </div>
+      </div>
       <p className="text-sm rounded-lg bg-amber-500/15 border border-amber-600/40 text-amber-950 dark:text-amber-100 p-4">
         {avisoLegal}
       </p>
       <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4">
-          Período {periodo?.month ?? "-"}/{periodo?.year ?? "-"}
-        </h2>
+        <h2 className="text-lg font-semibold mb-4">Detalle IVA — facturas del período</h2>
         <div className="grid md:grid-cols-2 gap-6">
           <div>
             <h3 className="font-medium text-emerald-700 dark:text-emerald-400 mb-2">IVA orientativo — débito (ventas)</h3>
@@ -550,6 +647,238 @@ function ResumenBlock({ data, moneyFn }: { data: Record<string, unknown>; moneyF
           Ganancia impositiva y contable dependen de otros ajustes; esto sólo ordena tus movimientos cargados aquí.
         </p>
       </div>
+    </div>
+  );
+}
+
+type BankPreviewRow = {
+  bankReference: string;
+  kind: "cobro" | "pago";
+  fecha: string;
+  importe: number;
+  concepto: string;
+  medio: string;
+  referenciaBanco: string;
+  observaciones: string;
+  duplicate: boolean;
+  existingKind?: string;
+  selected: boolean;
+};
+
+function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise<void> }) {
+  const { authHeader, onDone } = props;
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const [pdfStoragePath, setPdfStoragePath] = useState("");
+  const [cuentaNumero, setCuentaNumero] = useState("");
+  const [rows, setRows] = useState<BankPreviewRow[]>([]);
+
+  const processFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+      alert("Solo archivos PDF.");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("pdf", file);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/accounting/bank-ingest", {
+        method: "POST",
+        headers: authHeader,
+        body: fd,
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        movimientos?: BankPreviewRow[];
+        pdfStoragePath?: string;
+        cuentaNumero?: string;
+      };
+      if (!res.ok) {
+        alert(typeof j.error === "string" ? j.error : `Error HTTP ${res.status}`);
+        return;
+      }
+      setPdfStoragePath(String(j.pdfStoragePath ?? ""));
+      setCuentaNumero(String(j.cuentaNumero ?? ""));
+      setRows(
+        (j.movimientos ?? []).map((m) => ({
+          ...m,
+          selected: m.duplicate ? false : m.selected !== false,
+        }))
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleRow = (idx: number) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, selected: !r.selected } : r)));
+  };
+
+  const confirmImport = async () => {
+    const selected = rows.filter((r) => r.selected);
+    if (selected.length === 0) {
+      alert("Seleccioná al menos un movimiento.");
+      return;
+    }
+    setConfirming(true);
+    try {
+      const res = await fetch("/api/accounting/bank-ingest/confirm", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdfStoragePath: pdfStoragePath || undefined,
+          movements: selected,
+        }),
+      });
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        alert(String(j.error ?? "Error al importar"));
+        return;
+      }
+      const cob = Number(j.importedCobros ?? 0);
+      const pag = Number(j.importedPagos ?? 0);
+      const skip = Number(j.skippedDuplicates ?? 0);
+      alert(
+        `Importado: ${cob} cobro(s), ${pag} pago(s).` +
+          (skip ? ` ${skip} omitido(s) por duplicado.` : "")
+      );
+      setRows([]);
+      setPdfStoragePath("");
+      await onDone();
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const selectedCount = rows.filter((r) => r.selected).length;
+
+  return (
+    <div
+      className={`rounded-xl border-2 border-dashed p-6 transition-colors ${
+        drag
+          ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30"
+          : "border-zinc-300 dark:border-zinc-600"
+      } bg-white dark:bg-zinc-800 shadow-sm`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDrag(true);
+      }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDrag(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) void processFile(f);
+      }}
+    >
+      <h3 className="font-medium text-zinc-800 dark:text-zinc-100 mb-1">
+        Extracto bancario (PDF + IA)
+      </h3>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+        Subí el PDF de movimientos de la cuenta corriente. La IA detecta cobros y pagos; revisás la
+        tabla y confirmás. No duplica movimientos ya importados. Alimenta la caja del resumen junto
+        con facturas y Mercado Pago. El Libro IVA sigue saliendo de facturas.
+      </p>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          disabled={busy || confirming}
+          className="text-sm max-w-full"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void processFile(f);
+            e.target.value = "";
+          }}
+        />
+        {busy ? (
+          <span className="text-sm text-indigo-600 dark:text-indigo-400">Leyendo extracto…</span>
+        ) : null}
+        {cuentaNumero ? (
+          <span className="text-xs font-mono text-zinc-500">Cuenta {cuentaNumero}</span>
+        ) : null}
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="space-y-4">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
+                  <th className="py-2 px-2 w-10"></th>
+                  <th className="text-left py-2 px-2">Fecha</th>
+                  <th className="text-left py-2 px-2">Tipo</th>
+                  <th className="text-left py-2 px-2">Concepto</th>
+                  <th className="text-right py-2 px-2">Importe</th>
+                  <th className="text-left py-2 px-2">Ref.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr
+                    key={row.bankReference}
+                    className={`border-b border-zinc-100 dark:border-zinc-700/50 ${
+                      row.duplicate ? "opacity-60" : ""
+                    }`}
+                  >
+                    <td className="py-2 px-2">
+                      <input
+                        type="checkbox"
+                        checked={row.selected}
+                        disabled={row.duplicate}
+                        onChange={() => toggleRow(idx)}
+                      />
+                    </td>
+                    <td className="py-2 px-2 font-mono text-xs">{row.fecha}</td>
+                    <td className="py-2 px-2">
+                      <span
+                        className={
+                          row.kind === "cobro"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-orange-600 dark:text-orange-400"
+                        }
+                      >
+                        {row.kind}
+                      </span>
+                      {row.duplicate ? (
+                        <span className="ml-1 text-[10px] text-zinc-500">(ya cargado)</span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 px-2 max-w-[240px] truncate" title={row.concepto}>
+                      {row.concepto}
+                    </td>
+                    <td className="py-2 px-2 text-right font-medium">{money(row.importe)}</td>
+                    <td className="py-2 px-2 font-mono text-xs">{row.referenciaBanco}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <button
+              type="button"
+              disabled={confirming || selectedCount === 0}
+              onClick={() => void confirmImport()}
+              className="rounded-lg bg-indigo-600 text-white px-5 py-2 font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {confirming
+                ? "Importando…"
+                : `Confirmar importación (${selectedCount} movimiento${selectedCount === 1 ? "" : "s"})`}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border px-4 py-2 text-sm"
+              onClick={() => {
+                setRows([]);
+                setPdfStoragePath("");
+              }}
+            >
+              Descartar vista previa
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -615,7 +944,7 @@ function AccountingPdfAiCard(props: {
     >
       <h3 className="font-medium text-zinc-800 dark:text-zinc-100 mb-1">PDF + IA → base de datos</h3>
       <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-        El archivo se sube a Firebase Storage; OpenAI lee el PDF y genera el registro en Firestore.
+        El archivo se sube a Firebase Storage; Google AI (Gemini) lee el PDF y genera el registro en Firestore.
       </p>
       {mode === "factura" ? (
         <label className="flex flex-col gap-1 text-sm mb-4 max-w-xs">
@@ -779,14 +1108,75 @@ function FacturasTab(props: {
 
   return (
     <div className="space-y-6">
-      <AccountingPdfAiCard authHeader={authHeader} mode="factura" onDone={onRefresh} />
-      <form
-        onSubmit={submit}
-        className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-6 grid sm:grid-cols-2 gap-4 shadow-sm"
+      <TabPageIntro
+        title="Facturas"
+        description="Compras y ventas del mes para el Libro IVA orientativo. Exportá desde la pestaña ARCA / IVA."
+      />
+      <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
+        <table className="w-full text-sm min-w-[720px]">
+          <thead>
+            <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
+              <th className="text-left py-3 px-3">Tipo</th>
+              <th className="text-left py-3 px-3">Fecha</th>
+              <th className="text-left py-3 px-3">Nº / PV</th>
+              <th className="text-left py-3 px-3">Contraparte</th>
+              <th className="text-right py-3 px-3">Neto</th>
+              <th className="text-right py-3 px-3">IVA</th>
+              <th className="text-right py-3 px-3">Total</th>
+              <th className="text-left py-3 px-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {facturas.length === 0 ? (
+              <tr>
+                <td colSpan={8}>
+                  <EmptyListHint message="No hay facturas en este mes. Cargá con PDF + IA o alta manual." />
+                </td>
+              </tr>
+            ) : (
+              facturas.map((row) => {
+                const fid = String(row.id ?? "");
+                return (
+                  <tr key={fid} className="border-b border-zinc-100 dark:border-zinc-700/50">
+                    <td className="py-2 px-3">{String(row.tipo)}</td>
+                    <td className="py-2 px-3 font-mono text-xs">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
+                    <td className="py-2 px-3 font-mono text-xs">
+                      {String(row.puntoVenta ?? "")}-{String(row.numero ?? "")}
+                    </td>
+                    <td className="py-2 px-3 max-w-[200px] truncate" title={String(row.razonsocial ?? "")}>
+                      {String(row.razonsocial ?? "")}
+                    </td>
+                    <td className="py-2 px-3 text-right">{money(Number(row.netoGravado) || 0)}</td>
+                    <td className="py-2 px-3 text-right">{money(Number(row.iva) || 0)}</td>
+                    <td className="py-2 px-3 text-right">{money(Number(row.total) || 0)}</td>
+                    <td className="py-2 px-3 space-x-2">
+                      <button type="button" className="text-emerald-600 hover:underline" onClick={() => startEdit(row)}>
+                        Editar
+                      </button>
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => del(fid)}>
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+        <p className="text-xs text-zinc-500 p-4">Filtrado: {qh()}</p>
+      </div>
+      <CollapsibleSection title="PDF + IA (factura o comprobante)" subtitle="Clasificá venta o compra" defaultOpen={false}>
+        <div className="pt-4">
+          <AccountingPdfAiCard authHeader={authHeader} mode="factura" onDone={onRefresh} />
+        </div>
+      </CollapsibleSection>
+      <CollapsibleSection
+        title={editId ? "Editar factura" : "Alta manual"}
+        subtitle="Carga campo por campo"
+        defaultOpen={Boolean(editId)}
+        badge={editId ? "editando" : undefined}
       >
-        <h2 className="sm:col-span-2 font-semibold text-lg">
-          {editId ? "Editar factura / comprobante" : "Nueva factura o comprobante"}
-        </h2>
+      <form onSubmit={submit} className="grid sm:grid-cols-2 gap-4 pt-4">
         <label className="flex flex-col gap-1 text-sm">
           <span>Tipo libro</span>
           <select
@@ -926,56 +1316,7 @@ function FacturasTab(props: {
           )}
         </div>
       </form>
-
-      <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[960px] text-sm">
-            <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-200 dark:border-zinc-700">
-                <th className="text-left py-3 px-3">Tipo</th>
-                <th className="text-left py-3 px-3">Fecha</th>
-                <th className="text-left py-3 px-3">Nº / PV</th>
-                <th className="text-left py-3 px-3">Contraparte</th>
-                <th className="text-right py-3 px-3">Neto</th>
-                <th className="text-right py-3 px-3">IVA</th>
-                <th className="text-right py-3 px-3">Total</th>
-                <th className="text-left py-3 px-3">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {facturas.map((row) => {
-                const fid = String(row.id ?? "");
-                return (
-                  <tr key={fid} className="border-b border-zinc-100 dark:border-zinc-700/50">
-                    <td className="py-2 px-3">{String(row.tipo)}</td>
-                    <td className="py-2 px-3 font-mono text-xs">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
-                    <td className="py-2 px-3 font-mono text-xs">
-                      {String(row.puntoVenta ?? "")}-{String(row.numero ?? "")}
-                    </td>
-                    <td className="py-2 px-3 max-w-[200px] truncate" title={String(row.razonsocial ?? "")}>
-                      {String(row.razonsocial ?? "")}
-                    </td>
-                    <td className="py-2 px-3 text-right">{money(Number(row.netoGravado) || 0)}</td>
-                    <td className="py-2 px-3 text-right">{money(Number(row.iva) || 0)}</td>
-                    <td className="py-2 px-3 text-right">{money(Number(row.total) || 0)}</td>
-                    <td className="py-2 px-3 space-x-2">
-                      <button type="button" className="text-emerald-600 hover:underline" onClick={() => startEdit(row)}>
-                        Editar
-                      </button>
-                      <button type="button" className="text-red-600 hover:underline" onClick={() => del(fid)}>
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-xs text-zinc-500 p-4">
-          Lista filtrada por mes seleccionado (query {qh()}). Sin mes: muestra últimos 200.
-        </p>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1006,8 +1347,6 @@ function CobrosTab(props: {
   });
   const [editId, setEditId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [mpSyncing, setMpSyncing] = useState(false);
-  const [mpRange, setMpRange] = useState({ begin: "", end: "" });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1048,85 +1387,97 @@ function CobrosTab(props: {
     }
   };
 
-  const syncMercadoPago = async () => {
-    setMpSyncing(true);
-    try {
-      const body =
-        mpRange.begin.trim() && mpRange.end.trim()
-          ? { begin: mpRange.begin.trim(), end: mpRange.end.trim() }
-          : {};
-      const res = await fetch("/api/accounting/mercadopago/sync-cobros", {
-        method: "POST",
-        headers: { ...authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) {
-        alert(String(j.error ?? "Error sincronizando Mercado Pago"));
-        return;
-      }
-      const imported = Number(j.imported ?? 0);
-      const skipped = Number(j.skippedDuplicates ?? 0);
-      const fromMp = Number(j.fromMercadoPago ?? 0);
-      const errList = j.errors as string[] | undefined;
-      alert(
-        `Mercado Pago: ${imported} cobros nuevos · ${skipped} ya existían · ${fromMp} pagos aprobados en el rango.` +
-          (errList?.length ? `\nAvisos: ${errList.slice(0, 5).join("; ")}` : "")
-      );
-      await onRefresh();
-    } finally {
-      setMpSyncing(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
-      <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-6 space-y-4 shadow-sm">
-        <h2 className="font-semibold text-lg text-sky-900 dark:text-sky-100">Importar desde Mercado Pago</h2>
-        <p className="text-sm text-sky-800 dark:text-sky-200">
-          Trae pagos <strong>aprobados</strong> de la cuenta vinculada al token (suscripciones, checkout, links, etc.) y
-          los guarda como cobros sin factura. No duplica: usa el id de pago de MP.
-        </p>
-        <div className="flex flex-wrap gap-4 items-end">
-          <label className="flex flex-col gap-1 text-sm">
-            Desde (opcional)
-            <input
-              type="date"
-              value={mpRange.begin}
-              onChange={(e) => setMpRange((s) => ({ ...s, begin: e.target.value }))}
-              className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-800 border-sky-300 dark:border-sky-700"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Hasta (opcional)
-            <input
-              type="date"
-              value={mpRange.end}
-              onChange={(e) => setMpRange((s) => ({ ...s, end: e.target.value }))}
-              className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-800 border-sky-300 dark:border-sky-700"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={mpSyncing || (Boolean(mpRange.begin) !== Boolean(mpRange.end))}
-            onClick={syncMercadoPago}
-            className="rounded-lg bg-sky-600 text-white px-5 py-2 font-medium hover:bg-sky-700 disabled:opacity-50"
-          >
-            {mpSyncing ? "Sincronizando…" : "Sincronizar cobros MP"}
-          </button>
-        </div>
-        <p className="text-xs text-sky-700 dark:text-sky-300">
-          Si dejás las fechas vacías, se usan los últimos 30 días. Configurá{" "}
-          <code className="bg-sky-100 dark:bg-sky-900/80 px-1 rounded">MERCADOPAGO_ACCESS_TOKEN</code> en el servidor.
-        </p>
+      <TabPageIntro
+        title="Cobros"
+        description="Entradas de dinero del mes. Para importar banco o Mercado Pago usá la pestaña Importar."
+      />
+      <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
+        <table className="w-full text-sm min-w-[560px]">
+          <thead>
+            <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
+              <th className="text-left py-3 px-3">Fecha</th>
+              <th className="text-left py-3 px-3">Concepto</th>
+              <th className="text-right py-3 px-3">Importe</th>
+              <th className="text-left py-3 px-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cobros.length === 0 ? (
+              <tr>
+                <td colSpan={4}>
+                  <EmptyListHint message="No hay cobros en este mes. Importá desde la pestaña Importar o registrá uno manual." />
+                </td>
+              </tr>
+            ) : (
+              cobros.map((row) => {
+                const cid = String(row.id ?? "");
+                return (
+                  <tr key={cid} className="border-b border-zinc-100 dark:border-zinc-700/50">
+                    <td className="py-2 px-3 font-mono">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
+                    <td className="py-2 px-3">
+                      {String(row.concepto ?? "")}
+                      {row.mercadopagoPaymentId ? (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-sky-600 dark:text-sky-400">
+                          MP #{String(row.mercadopagoPaymentId)}
+                        </span>
+                      ) : null}
+                      {row.bankReference ? (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
+                          Banco
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 px-3 text-right">{money(Number(row.importe) || 0)}</td>
+                    <td className="py-2 px-3 space-x-2">
+                      <button
+                        type="button"
+                        className="text-emerald-600 hover:underline"
+                        onClick={() => {
+                          setEditId(cid);
+                          setForm({
+                            fecha: fechaFieldToUi(String(row.fecha ?? "")),
+                            importe: String(row.importe ?? ""),
+                            concepto: String(row.concepto ?? ""),
+                            medio: String(row.medio ?? "transferencia"),
+                            facturaId: String(row.facturaId ?? ""),
+                            observaciones: String(row.observaciones ?? ""),
+                          });
+                        }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="text-red-600 hover:underline"
+                        onClick={async () => {
+                          if (!confirm("¿Eliminar?")) return;
+                          await fetch(`/api/accounting/cobros/${cid}`, {
+                            method: "DELETE",
+                            headers: authHeader,
+                          });
+                          await onRefresh();
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+        <p className="text-xs text-zinc-500 p-4">Filtrado: {qh()}</p>
       </div>
-      <form
-        className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-6 grid sm:grid-cols-2 gap-4 shadow-sm"
-        onSubmit={submit}
+      <CollapsibleSection
+        title={editId ? "Editar cobro" : "Registrar cobro manual"}
+        subtitle="Alta o edición de un ingreso puntual"
+        defaultOpen={Boolean(editId)}
+        badge={editId ? "editando" : undefined}
       >
-        <h2 className="sm:col-span-2 font-semibold text-lg">
-          {editId ? "Editar cobro" : "Registrar cobro"}
-        </h2>
+      <form className="grid sm:grid-cols-2 gap-4 pt-4" onSubmit={submit}>
         <label className="flex flex-col gap-1 text-sm">
           Fecha
           <input
@@ -1202,72 +1553,7 @@ function CobrosTab(props: {
           )}
         </div>
       </form>
-
-      <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
-        <table className="w-full text-sm min-w-[560px]">
-          <thead>
-            <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
-              <th className="text-left py-3 px-3">Fecha</th>
-              <th className="text-left py-3 px-3">Concepto</th>
-              <th className="text-right py-3 px-3">Importe</th>
-              <th className="text-left py-3 px-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {cobros.map((row) => {
-              const cid = String(row.id ?? "");
-              return (
-                <tr key={cid} className="border-b border-zinc-100 dark:border-zinc-700/50">
-                  <td className="py-2 px-3 font-mono">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
-                  <td className="py-2 px-3">
-                    {String(row.concepto ?? "")}
-                    {row.mercadopagoPaymentId ? (
-                      <span className="ml-2 text-[10px] uppercase tracking-wide text-sky-600 dark:text-sky-400">
-                        MP #{String(row.mercadopagoPaymentId)}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="py-2 px-3 text-right">{money(Number(row.importe) || 0)}</td>
-                  <td className="py-2 px-3 space-x-2">
-                    <button
-                      type="button"
-                      className="text-emerald-600 hover:underline"
-                      onClick={() => {
-                        setEditId(cid);
-                        setForm({
-                          fecha: fechaFieldToUi(String(row.fecha ?? "")),
-                          importe: String(row.importe ?? ""),
-                          concepto: String(row.concepto ?? ""),
-                          medio: String(row.medio ?? "transferencia"),
-                          facturaId: String(row.facturaId ?? ""),
-                          observaciones: String(row.observaciones ?? ""),
-                        });
-                      }}
-                    >
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      className="text-red-600 hover:underline"
-                      onClick={async () => {
-                        if (!confirm("¿Eliminar?")) return;
-                        await fetch(`/api/accounting/cobros/${cid}`, {
-                          method: "DELETE",
-                          headers: authHeader,
-                        });
-                        await onRefresh();
-                      }}
-                    >
-                      Eliminar
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className="text-xs text-zinc-500 p-4">Filtrado: {qh()}</p>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1344,14 +1630,22 @@ function PagosTab(props: {
 
   return (
     <div className="space-y-6">
-      <AccountingPdfAiCard authHeader={authHeader} mode="pago" onDone={onRefresh} />
-      <form
-        className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-6 grid sm:grid-cols-2 gap-4 shadow-sm"
-        onSubmit={submit}
+      <TabPageIntro
+        title="Pagos"
+        description="Salidas y gastos del mes. Para PDF de comprobantes o extracto bancario, usá Importar."
+      />
+      <CollapsibleSection title="PDF + IA (un gasto por archivo)" subtitle="Gemini lee el comprobante" defaultOpen={false}>
+        <div className="pt-4">
+          <AccountingPdfAiCard authHeader={authHeader} mode="pago" onDone={onRefresh} />
+        </div>
+      </CollapsibleSection>
+      <CollapsibleSection
+        title={editId ? "Editar pago" : "Registrar pago manual"}
+        subtitle="Alta o edición de un egreso"
+        defaultOpen={Boolean(editId)}
+        badge={editId ? "editando" : undefined}
       >
-        <h2 className="sm:col-span-2 font-semibold text-lg">
-          {editId ? "Editar pago" : "Registrar pago"}
-        </h2>
+      <form className="grid sm:grid-cols-2 gap-4 pt-4" onSubmit={submit}>
         <label className="flex flex-col gap-1 text-sm">
           Fecha
           <input
@@ -1434,6 +1728,7 @@ function PagosTab(props: {
           )}
         </div>
       </form>
+      </CollapsibleSection>
 
       <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
         <table className="w-full text-sm min-w-[620px]">
@@ -1453,7 +1748,14 @@ function PagosTab(props: {
                 <tr key={pid} className="border-b border-zinc-100 dark:border-zinc-700/50">
                   <td className="py-2 px-3 font-mono">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
                   <td className="py-2 px-3">{String(row.proveedor ?? "—")}</td>
-                  <td className="py-2 px-3">{String(row.concepto ?? "")}</td>
+                  <td className="py-2 px-3">
+                    {String(row.concepto ?? "")}
+                    {row.bankReference ? (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
+                        Banco
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="py-2 px-3 text-right">{money(Number(row.importe) || 0)}</td>
                   <td className="py-2 px-3 space-x-2">
                     <button

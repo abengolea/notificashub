@@ -1,68 +1,53 @@
-import OpenAI from "openai";
+import {
+  accountingPdfModel,
+  getGenerativeModel,
+  parseModelJsonObject,
+  pdfBase64Payload,
+} from "@/lib/ai/google-gemini";
+import type { RawBankMovement } from "@/lib/accounting/bank-extract";
 import { medioPagoSchema, tipoComprobanteSchema } from "@/lib/accounting/schemas";
 
-const FACTURA_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    numero: { type: "string" },
-    puntoVenta: { type: "string" },
-    fecha: { type: "string", description: "YYYY-MM-DD" },
-    razonsocial: { type: "string" },
-    cuit: { type: "string" },
-    tipoComprobante: {
-      type: "string",
-      enum: ["A", "B", "C", "credito_a", "credito_b", "credito_c", "otro"],
-    },
-    netoGravado: { type: "number" },
-    iva: { type: "number" },
-    otrosImpuestos: { type: "number" },
-    total: { type: "number" },
-    observaciones: { type: "string" },
-  },
-  required: [
-    "numero",
-    "puntoVenta",
-    "fecha",
-    "razonsocial",
-    "cuit",
-    "tipoComprobante",
-    "netoGravado",
-    "iva",
-    "otrosImpuestos",
-    "total",
-    "observaciones",
-  ],
-} as const;
+const FACTURA_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
+{
+  "numero": string,
+  "puntoVenta": string,
+  "fecha": string (YYYY-MM-DD),
+  "razonsocial": string,
+  "cuit": string,
+  "tipoComprobante": "A"|"B"|"C"|"credito_a"|"credito_b"|"credito_c"|"otro",
+  "netoGravado": number,
+  "iva": number,
+  "otrosImpuestos": number,
+  "total": number,
+  "observaciones": string
+}`;
 
-const PAGO_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    fecha: { type: "string", description: "YYYY-MM-DD" },
-    importe: { type: "number" },
-    concepto: { type: "string" },
-    proveedor: { type: "string" },
-    medio: {
-      type: "string",
-      enum: ["transferencia", "efectivo", "cheque", "tarjeta", "otro"],
-    },
-    observaciones: { type: "string" },
-  },
-  required: ["fecha", "importe", "concepto", "proveedor", "medio", "observaciones"],
-} as const;
-
-function getClient(): OpenAI {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) {
-    throw new Error("Falta OPENAI_API_KEY en el entorno del servidor.");
-  }
-  return new OpenAI({ apiKey: key });
+const EXTRACTO_BANCO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves:
+{
+  "cuentaNumero": string (número de cuenta corriente sin espacios),
+  "moneda": string (ej. ARS, PESOS),
+  "movimientos": [
+    {
+      "fecha": string (YYYY-MM-DD),
+      "importe": number (positivo si entra dinero a la cuenta, negativo si sale),
+      "concepto": string (texto de causal/concepto tal como figura),
+      "referenciaBanco": string (número de referencia / comprobante si aparece),
+      "saldo": number (saldo después del movimiento si figura, sino 0),
+      "clasificacion": "cobro"|"pago"|"ignorar" (orientativo)
+    }
+  ]
 }
+Incluí TODAS las filas de movimientos del extracto, no encabezados ni totales.`;
 
-function modelo(): string {
-  return process.env.ACCOUNTING_PDF_AI_MODEL?.trim() || "gpt-4o";
-}
+const PAGO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
+{
+  "fecha": string (YYYY-MM-DD),
+  "importe": number,
+  "concepto": string,
+  "proveedor": string,
+  "medio": "transferencia"|"efectivo"|"cheque"|"tarjeta"|"otro",
+  "observaciones": string
+}`;
 
 function normalizeCuitDigits(s: string): string | undefined {
   const d = String(s ?? "")
@@ -88,51 +73,46 @@ export async function extractFacturaFromPdf(params: {
   filename: string;
   tipoLibro: "venta" | "compra";
 }) {
-  const openai = getClient();
-  const response = await openai.responses.create({
-    model: modelo(),
-    instructions:
-      "Sos un asistente contable para Argentina (AFIP/comprobantes). Leé el PDF y extraé únicamente lo pedido.",
-    input: [
+  const model = getGenerativeModel(accountingPdfModel());
+  const pdfData = pdfBase64Payload(params.pdfBase64);
+  const contexto =
+    params.tipoLibro === "venta"
+      ? "factura emitida / ventas — IVA débito"
+      : "factura recibida / compras — IVA crédito";
+
+  const prompt =
+    "Sos un asistente contable para Argentina (AFIP/comprobantes). Analizá el PDF adjunto. " +
+    `El usuario clasificó el comprobante como libro ${params.tipoLibro} (${contexto}). ` +
+    "Extraé los datos del comprobante. Fecha siempre YYYY-MM-DD. Importes numéricos con punto decimal. " +
+    "Si un dato no figura, usá cadena vacía o 0 según corresponda.\n\n" +
+    FACTURA_JSON_INSTRUCTION;
+
+  const result = await model.generateContent({
+    contents: [
       {
         role: "user",
-        content: [
+        parts: [
+          { text: prompt },
           {
-            type: "input_text",
-            text:
-              `Analizá el PDF adjunto. El usuario clasificó el comprobante como libro ${params.tipoLibro} (` +
-              (params.tipoLibro === "venta"
-                ? "factura emitida / ventas — IVA débito"
-                : "factura recibida / compras — IVA crédito") +
-              `). Devolvé los campos del esquema. Fecha siempre ISO YYYY-MM-DD. Importes en número (punto decimal). ` +
-              `tipoComprobante: A/B/C o nota de crédito (credito_a/b/c) u otro. Si un dato no figura, usá cadena vacía o 0 según corresponda.`,
-          },
-          {
-            type: "input_file",
-            filename: params.filename || "documento.pdf",
-            file_data: params.pdfBase64,
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfData,
+            },
           },
         ],
       },
     ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "factura_extract",
-        strict: true,
-        schema: FACTURA_SCHEMA,
-      },
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
     },
   });
 
-  if (response.error) {
-    throw new Error(response.error.message ?? "Error del modelo al leer el PDF.");
-  }
-  const rawText = response.output_text?.trim();
+  const rawText = result.response.text()?.trim();
   if (!rawText) {
     throw new Error("El modelo no devolvió datos.");
   }
-  const raw = JSON.parse(rawText) as Record<string, unknown>;
+  const raw = parseModelJsonObject(rawText);
   return {
     tipo: params.tipoLibro,
     numero: String(raw.numero ?? "").trim(),
@@ -150,47 +130,41 @@ export async function extractFacturaFromPdf(params: {
 }
 
 export async function extractPagoFromPdf(params: { pdfBase64: string; filename: string }) {
-  const openai = getClient();
-  const response = await openai.responses.create({
-    model: modelo(),
-    instructions:
-      "Sos un asistente contable. Leé el comprobante de pago o factura de gasto y extraé los campos del esquema.",
-    input: [
+  const model = getGenerativeModel(accountingPdfModel());
+  const pdfData = pdfBase64Payload(params.pdfBase64);
+
+  const prompt =
+    "Sos un asistente contable. Analizá el PDF (comprobante de pago o factura de gasto). " +
+    "Identificá fecha del gasto/pago, importe total, concepto breve, proveedor o beneficiario si aparece, y medio de pago más probable. " +
+    "Fecha YYYY-MM-DD. Si no hay proveedor, cadena vacía. observaciones: texto corto opcional o vacío.\n\n" +
+    PAGO_JSON_INSTRUCTION;
+
+  const result = await model.generateContent({
+    contents: [
       {
         role: "user",
-        content: [
+        parts: [
+          { text: prompt },
           {
-            type: "input_text",
-            text:
-              "Identificá fecha del gasto/pago, importe total pagado o adeudado, concepto breve, proveedor o beneficiario si aparece, y medio de pago más probable. " +
-              "Fecha YYYY-MM-DD. Si no hay proveedor, cadena vacía. observaciones: texto corto opcional o vacío.",
-          },
-          {
-            type: "input_file",
-            filename: params.filename || "documento.pdf",
-            file_data: params.pdfBase64,
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfData,
+            },
           },
         ],
       },
     ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "pago_extract",
-        strict: true,
-        schema: PAGO_SCHEMA,
-      },
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
     },
   });
 
-  if (response.error) {
-    throw new Error(response.error.message ?? "Error del modelo al leer el PDF.");
-  }
-  const rawText = response.output_text?.trim();
+  const rawText = result.response.text()?.trim();
   if (!rawText) {
     throw new Error("El modelo no devolvió datos.");
   }
-  const raw = JSON.parse(rawText) as Record<string, unknown>;
+  const raw = parseModelJsonObject(rawText);
   return {
     fecha: String(raw.fecha ?? "").trim(),
     importe: Number(raw.importe ?? 0),
@@ -198,5 +172,70 @@ export async function extractPagoFromPdf(params: { pdfBase64: string; filename: 
     proveedor: String(raw.proveedor ?? "").trim() || undefined,
     medio: coerceMedio(raw.medio),
     observaciones: String(raw.observaciones ?? "").trim() || undefined,
+  };
+}
+
+function parseMovimientosArray(raw: unknown): RawBankMovement[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RawBankMovement[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const importe = Number(o.importe);
+    if (!Number.isFinite(importe) || importe === 0) continue;
+    out.push({
+      fecha: String(o.fecha ?? "").trim(),
+      importe,
+      concepto: String(o.concepto ?? "").trim(),
+      referenciaBanco: String(o.referenciaBanco ?? o.referencia ?? "").trim() || undefined,
+      saldo: o.saldo != null && Number.isFinite(Number(o.saldo)) ? Number(o.saldo) : undefined,
+      clasificacion: String(o.clasificacion ?? "").trim() || undefined,
+    });
+  }
+  return out;
+}
+
+export async function extractBankExtractFromPdf(params: { pdfBase64: string; filename: string }) {
+  const model = getGenerativeModel(accountingPdfModel());
+  const pdfData = pdfBase64Payload(params.pdfBase64);
+
+  const prompt =
+    "Sos un asistente contable argentino. Analizá el PDF de extracto bancario / últimos movimientos de cuenta corriente. " +
+    "Extraé cada línea de movimiento con fecha, importe con signo (crédito positivo, débito negativo), concepto y referencia. " +
+    "Fechas en YYYY-MM-DD. Importes con punto decimal, sin símbolo $. " +
+    "Si el PDF muestra importes con formato argentino (1.234,56), convertí a número JavaScript (1234.56). " +
+    "clasificacion: cobro si es ingreso, pago si es egreso o comisión/impuesto, ignorar solo filas que no sean movimientos.\n\n" +
+    EXTRACTO_BANCO_JSON_INSTRUCTION;
+
+  const result = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfData,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const rawText = result.response.text()?.trim();
+  if (!rawText) {
+    throw new Error("El modelo no devolvió datos.");
+  }
+  const raw = parseModelJsonObject(rawText);
+  return {
+    cuentaNumero: String(raw.cuentaNumero ?? raw.cuenta ?? "").trim(),
+    moneda: String(raw.moneda ?? "ARS").trim(),
+    movimientos: parseMovimientosArray(raw.movimientos),
   };
 }

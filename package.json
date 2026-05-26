@@ -26,17 +26,21 @@
     "set-whatsapp-token": "tsx scripts/set-whatsapp-token.ts",
     "afip:ping": "tsx scripts/afip-ping.ts",
     "afip:cert-check": "tsx scripts/afip-cert-check.ts",
-    "afip:folder-scan": "tsx scripts/afip-folder-scan.ts"
+    "afip:folder-scan": "tsx scripts/afip-folder-scan.ts",
+    "secrets:push": "node scripts/push-apphosting-secrets-from-env.mjs",
+    "secrets:push:dry": "node scripts/push-apphosting-secrets-from-env.mjs --dry-run",
+    "secrets:keys": "node scripts/push-apphosting-secrets-from-env.mjs --keys",
+    "secrets:push:manual": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/push-secrets-manual.ps1"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",
+    "@google/generative-ai": "^0.24.1",
     "fast-xml-parser": "^5.7.3",
     "firebase": "^12.10.0",
     "firebase-admin": "^13.7.0",
     "jszip": "^3.10.1",
     "next": "16.1.6",
     "nodemailer": "^8.0.7",
-    "openai": "^6.36.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "undici": "^8.2.0",
