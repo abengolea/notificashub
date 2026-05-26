@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = process.cwd();
 
 const nextConfig: NextConfig = {
   // Evita que Turbopack elija el directorio equivocado si hay otro package-lock en un directorio padre (p. ej. monorepo local o CI).
