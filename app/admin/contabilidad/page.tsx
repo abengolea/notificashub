@@ -118,7 +118,7 @@ export default function ContabilidadPage() {
     setToken(sessionStorage.getItem(DASHBOARD_TOKEN_STORAGE_KEY));
   }, []);
 
-  const qh = () => `year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}`;
+  const qh = useCallback(() => `year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}`, [year, month]);
 
   const loadResumen = useCallback(async () => {
     if (!token) return;
@@ -133,7 +133,7 @@ export default function ContabilidadPage() {
       return;
     }
     setResumen(await res.json());
-  }, [token, year, month, authHeader]);
+  }, [token, authHeader, qh]);
 
   const loadLists = useCallback(async () => {
     if (!token) return;
@@ -184,7 +184,7 @@ export default function ContabilidadPage() {
       const j = await pRes.json();
       setPagos(j.pagos ?? []);
     }
-  }, [token, year, month, authHeader]);
+  }, [token, authHeader, qh]);
 
   useEffect(() => {
     try {
