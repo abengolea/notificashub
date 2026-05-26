@@ -66,12 +66,23 @@ export function getAdminApp(): App {
     process.cwd(),
     "studio-3864746689-59018-firebase-adminsdk-fbsvc-330fe6860c.json"
   );
-  console.warn(
-    "[firebase-admin] Usando credencial legacy en disco (solo dev). " +
-      "Configurá FIREBASE_* o GOOGLE_APPLICATION_CREDENTIALS."
-  );
+  if (existsSync(legacyPath)) {
+    console.warn(
+      "[firebase-admin] Usando credencial legacy en disco (solo dev). " +
+        "Configurá FIREBASE_* o GOOGLE_APPLICATION_CREDENTIALS."
+    );
+    return initializeApp({
+      credential: cert(legacyPath),
+    });
+  }
+
+  const storageBucket =
+    process.env.FIREBASE_STORAGE_BUCKET ||
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+    `${HUB_PROJECT_ID}.appspot.com`;
   return initializeApp({
-    credential: cert(legacyPath),
+    projectId: HUB_PROJECT_ID,
+    storageBucket,
   });
 }
 
