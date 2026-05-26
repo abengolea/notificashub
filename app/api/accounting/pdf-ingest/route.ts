@@ -26,9 +26,9 @@ export async function POST(req: NextRequest) {
   const denied = await requireDashboard(req);
   if (denied) return denied;
 
-  if (!process.env.OPENAI_API_KEY?.trim()) {
+  if (!process.env.GOOGLE_AI_API_KEY?.trim()) {
     return NextResponse.json(
-      { error: "OPENAI_API_KEY no configurada en el servidor." },
+      { error: "GOOGLE_AI_API_KEY no configurada en el servidor." },
       { status: 503 }
     );
   }

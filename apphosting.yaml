@@ -4,6 +4,64 @@ runConfig:
   concurrency: 10
 
 env:
+  # Firebase Web SDK: Next.js necesita estas variables en BUILD para inyectarlas
+  # en el bundle cliente. Si faltan, Auth falla con auth/invalid-api-key.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    secret: NEXT_PUBLIC_FIREBASE_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    secret: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    secret: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    secret: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    secret: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    secret: NEXT_PUBLIC_FIREBASE_APP_ID
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NOTIFICAS_FIREBASE_PROJECT_ID
+    secret: NOTIFICAS_FIREBASE_PROJECT_ID
+    availability:
+      - RUNTIME
+
+  - variable: NOTIFICAS_FIREBASE_CLIENT_EMAIL
+    secret: NOTIFICAS_FIREBASE_CLIENT_EMAIL
+    availability:
+      - RUNTIME
+
+  - variable: NOTIFICAS_FIREBASE_PRIVATE_KEY
+    secret: NOTIFICAS_FIREBASE_PRIVATE_KEY
+    availability:
+      - RUNTIME
+
+  - variable: NOTIFICASHUB_PROJECT_ID
+    value: studio-3864746689-59018
+    availability:
+      - RUNTIME
+
   - variable: WHATSAPP_VERIFY_TOKEN
     value: notificas_webhook_2026
     availability:
@@ -37,6 +95,11 @@ env:
       - RUNTIME
   - variable: NOTIFICASHUB_URL
     secret: NOTIFICASHUB_URL
+
+  - variable: GOOGLE_AI_API_KEY
+    secret: GOOGLE_AI_API_KEY
+    availability:
+      - RUNTIME
 
   - variable: NOTIFICAS_BILLING_SHARED_SECRET
     secret: NOTIFICAS_BILLING_SHARED_SECRET

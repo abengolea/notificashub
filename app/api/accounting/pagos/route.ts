@@ -48,6 +48,8 @@ export async function GET(req: NextRequest) {
         proveedor: d.proveedor ?? "",
         facturaId: d.facturaId ?? "",
         observaciones: d.observaciones ?? "",
+        bankReference: d.bankReference ? String(d.bankReference) : "",
+        bankReferencia: d.bankReferencia ? String(d.bankReferencia) : "",
       };
     });
 
