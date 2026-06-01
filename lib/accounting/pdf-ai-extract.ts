@@ -5,7 +5,8 @@ import {
   pdfBase64Payload,
 } from "@/lib/ai/google-gemini";
 import type { RawBankMovement } from "@/lib/accounting/bank-extract";
-import { medioPagoSchema, tipoComprobanteSchema } from "@/lib/accounting/schemas";
+import { medioPagoSchema, tipoComprobanteSchema, invoiceTypeSchema } from "@/lib/accounting/schemas";
+import { cuitsMatch, NOTIFICAS_CUIT, normalizeCuitDigits } from "@/lib/accounting/pago-fiscal";
 
 const FACTURA_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
 {
@@ -39,6 +40,32 @@ const EXTRACTO_BANCO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (
 }
 Incluí TODAS las filas de movimientos del extracto, no encabezados ni totales.`;
 
+const PAGO_FISCAL_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
+{
+  "invoiceType": "factura_a"|"factura_b"|"factura_c"|"ticket"|"recibo"|"sin_comprobante"|"otro",
+  "posNumber": string,
+  "invoiceNumber": string,
+  "supplierCuit": string (11 dígitos sin guiones),
+  "supplierName": string,
+  "supplierVatCondition": "responsable_inscripto"|"monotributo"|"exento"|"consumidor_final"|"otro",
+  "invoiceDate": string (YYYY-MM-DD),
+  "paymentDate": string (YYYY-MM-DD, fecha de pago si difiere),
+  "totalAmount": number,
+  "netTaxedAmount": number,
+  "vat21Amount": number,
+  "vat105Amount": number,
+  "vat27Amount": number,
+  "exemptAmount": number,
+  "vatPerceptionAmount": number,
+  "grossIncomePerceptionAmount": number,
+  "otherTaxesAmount": number,
+  "concepto": string (descripción breve del gasto),
+  "paymentMethod": "transferencia"|"efectivo"|"cheque"|"tarjeta"|"otro",
+  "receiverCuit": string (CUIT del receptor/comprador en la factura, 11 dígitos),
+  "receiverName": string,
+  "observaciones": string
+}`;
+
 const PAGO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
 {
   "fecha": string (YYYY-MM-DD),
@@ -49,10 +76,8 @@ const PAGO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdo
   "observaciones": string
 }`;
 
-function normalizeCuitDigits(s: string): string | undefined {
-  const d = String(s ?? "")
-    .replace(/\D/g, "")
-    .slice(0, 11);
+function normalizeCuitOptional(s: string): string | undefined {
+  const d = normalizeCuitDigits(s);
   return d.length > 0 ? d : undefined;
 }
 
@@ -119,13 +144,148 @@ export async function extractFacturaFromPdf(params: {
     puntoVenta: String(raw.puntoVenta ?? "").trim() || undefined,
     fecha: String(raw.fecha ?? "").trim(),
     razonsocial: String(raw.razonsocial ?? "").trim(),
-    cuit: normalizeCuitDigits(String(raw.cuit ?? "")),
+    cuit: normalizeCuitOptional(String(raw.cuit ?? "")),
     tipoComprobante: coerceTipoComprobante(raw.tipoComprobante),
     netoGravado: Number(raw.netoGravado ?? 0),
     iva: Number(raw.iva ?? 0),
     otrosImpuestos: Number(raw.otrosImpuestos ?? 0),
     total: Number(raw.total ?? 0),
     observaciones: String(raw.observaciones ?? "").trim() || undefined,
+  };
+}
+
+function coerceInvoiceType(v: unknown): string | undefined {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, "_") : "";
+  const map: Record<string, string> = {
+    a: "factura_a",
+    factura_a: "factura_a",
+    "factura a": "factura_a",
+    b: "factura_b",
+    factura_b: "factura_b",
+    "factura b": "factura_b",
+    c: "factura_c",
+    factura_c: "factura_c",
+    "factura c": "factura_c",
+    ticket: "ticket",
+    recibo: "recibo",
+    sin_comprobante: "sin_comprobante",
+    otro: "otro",
+  };
+  const key = map[s] ?? s;
+  const parsed = invoiceTypeSchema.safeParse(key);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function coerceSupplierVatCondition(v: unknown): string | undefined {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, "_") : "";
+  const allowed = ["responsable_inscripto", "monotributo", "exento", "consumidor_final", "otro"] as const;
+  return (allowed as readonly string[]).includes(s) ? s : undefined;
+}
+
+export type PagoFiscalExtract = {
+  invoiceType?: string;
+  posNumber?: string;
+  invoiceNumber?: string;
+  supplierCuit?: string;
+  supplierName?: string;
+  supplierVatCondition?: string;
+  invoiceDate?: string;
+  paymentDate?: string;
+  totalAmount: number;
+  netTaxedAmount: number;
+  vat21Amount: number;
+  vat105Amount: number;
+  vat27Amount: number;
+  exemptAmount: number;
+  vatPerceptionAmount: number;
+  grossIncomePerceptionAmount: number;
+  otherTaxesAmount: number;
+  concepto: string;
+  proveedor?: string;
+  fecha: string;
+  importe: number;
+  medio?: string;
+  observaciones?: string;
+  receiverCuit?: string;
+  receiverName?: string;
+  issuedToCompany: boolean | null;
+  isVatComputable: boolean;
+};
+
+export async function extractPagoFiscalFromPdf(params: { pdfBase64: string; filename: string }): Promise<PagoFiscalExtract> {
+  const model = getGenerativeModel(accountingPdfModel());
+  const pdfData = pdfBase64Payload(params.pdfBase64);
+
+  const prompt =
+    "Sos un asistente contable para Argentina (AFIP/comprobantes). Analizá el PDF adjunto (factura de compra o comprobante de gasto). " +
+    "Extraé todos los datos fiscales posibles: tipo de factura (A/B/C), punto de venta, número, CUIT y razón social del emisor/proveedor, " +
+    "condición IVA del proveedor si figura, fecha del comprobante, importes (total, neto gravado, IVA 21%, 10.5%, 27%, exento, percepciones IVA e IIBB, otros impuestos). " +
+    "También extraé CUIT y razón social del RECEPTOR/COMPRADOR para verificar si la factura está a nombre de NOTIFICAS S. R. L. (CUIT 33717298689). " +
+    "Fechas YYYY-MM-DD. Importes numéricos con punto decimal. Si un dato no figura, cadena vacía o 0.\n\n" +
+    PAGO_FISCAL_JSON_INSTRUCTION;
+
+  const result = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfData,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const rawText = result.response.text()?.trim();
+  if (!rawText) {
+    throw new Error("El modelo no devolvió datos.");
+  }
+  const raw = parseModelJsonObject(rawText);
+
+  const receiverCuit = normalizeCuitDigits(String(raw.receiverCuit ?? ""));
+  const issuedToCompany = receiverCuit ? cuitsMatch(receiverCuit, NOTIFICAS_CUIT) : null;
+  const invoiceType = coerceInvoiceType(raw.invoiceType);
+  const totalAmount = Number(raw.totalAmount ?? raw.importe ?? 0);
+  const paymentDate = String(raw.paymentDate ?? raw.fecha ?? raw.invoiceDate ?? "").trim();
+  const invoiceDate = String(raw.invoiceDate ?? raw.fecha ?? "").trim();
+
+  return {
+    invoiceType,
+    posNumber: String(raw.posNumber ?? raw.puntoVenta ?? "").trim() || undefined,
+    invoiceNumber: String(raw.invoiceNumber ?? raw.numero ?? "").trim() || undefined,
+    supplierCuit: normalizeCuitDigits(String(raw.supplierCuit ?? raw.cuit ?? "")),
+    supplierName: String(raw.supplierName ?? raw.razonsocial ?? raw.proveedor ?? "").trim() || undefined,
+    supplierVatCondition: coerceSupplierVatCondition(raw.supplierVatCondition),
+    invoiceDate: invoiceDate || undefined,
+    paymentDate: paymentDate || invoiceDate || undefined,
+    totalAmount,
+    netTaxedAmount: Number(raw.netTaxedAmount ?? raw.netoGravado ?? 0),
+    vat21Amount: Number(raw.vat21Amount ?? raw.iva ?? 0),
+    vat105Amount: Number(raw.vat105Amount ?? 0),
+    vat27Amount: Number(raw.vat27Amount ?? 0),
+    exemptAmount: Number(raw.exemptAmount ?? 0),
+    vatPerceptionAmount: Number(raw.vatPerceptionAmount ?? 0),
+    grossIncomePerceptionAmount: Number(raw.grossIncomePerceptionAmount ?? 0),
+    otherTaxesAmount: Number(raw.otherTaxesAmount ?? raw.otrosImpuestos ?? 0),
+    concepto: String(raw.concepto ?? "").trim() || "Gasto desde PDF",
+    proveedor: String(raw.proveedor ?? raw.supplierName ?? raw.razonsocial ?? "").trim() || undefined,
+    fecha: paymentDate || invoiceDate || new Date().toISOString().slice(0, 10),
+    importe: totalAmount,
+    medio: coerceMedio(raw.paymentMethod ?? raw.medio),
+    observaciones: String(raw.observaciones ?? "").trim() || undefined,
+    receiverCuit: receiverCuit || undefined,
+    receiverName: String(raw.receiverName ?? "").trim() || undefined,
+    issuedToCompany,
+    isVatComputable: invoiceType === "factura_a" && issuedToCompany === true,
   };
 }
 

@@ -5,7 +5,7 @@ import { requireDashboard } from "@/lib/require-dashboard";
 import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { pagoBodySchema } from "@/lib/accounting/schemas";
-import { toIso } from "@/lib/accounting/serialize";
+import { pagoBodyToFirestore, pagoDocToRecord, pagoFirestoreWithTimestamps } from "@/lib/accounting/pago-persist";
 
 function bounds(searchParams: URLSearchParams): { start: Timestamp; end: Timestamp } | null {
   const y = searchParams.get("year");
@@ -37,21 +37,7 @@ export async function GET(req: NextRequest) {
             .get()
         : await col.orderBy("fecha", "desc").limit(200).get();
 
-    const items = snap.docs.map((doc) => {
-      const d = doc.data();
-      return {
-        id: doc.id,
-        fecha: toIso(d.fecha),
-        importe: d.importe ?? 0,
-        concepto: d.concepto ?? "",
-        medio: d.medio ?? "",
-        proveedor: d.proveedor ?? "",
-        facturaId: d.facturaId ?? "",
-        observaciones: d.observaciones ?? "",
-        bankReference: d.bankReference ? String(d.bankReference) : "",
-        bankReferencia: d.bankReferencia ? String(d.bankReferencia) : "",
-      };
-    });
+    const items = snap.docs.map((doc) => pagoDocToRecord(doc.id, doc.data()));
 
     return NextResponse.json({ pagos: items });
   } catch (e) {
@@ -77,16 +63,16 @@ export async function POST(req: NextRequest) {
   }
 
   const row = parsed.data;
+  const fsRow = pagoBodyToFirestore(row);
+  const paymentDate = row.paymentDate ?? row.fecha;
+
   try {
+    const paymentTs = Timestamp.fromDate(dateOnlyToUtcMidday(paymentDate));
+    const doc = pagoFirestoreWithTimestamps(fsRow, paymentTs);
+
     const ref = await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
       empresa: "notificas_srl",
-      fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.fecha)),
-      importe: row.importe,
-      concepto: row.concepto,
-      medio: row.medio ?? null,
-      proveedor: row.proveedor ?? null,
-      facturaId: row.facturaId ?? null,
-      observaciones: row.observaciones ?? null,
+      ...doc,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });

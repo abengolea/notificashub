@@ -1,0 +1,38 @@
+/** Tipo compartido del registro de pago — evita import circular. */
+export type ReturnTypeOfPagoDocToRecord = {
+  id: string;
+  fecha: string;
+  importe: number;
+  concepto: string;
+  proveedor: string;
+  medio: string | null;
+  observaciones: string;
+  facturaId: string;
+  bankReference: string;
+  bankReferencia: string;
+  invoiceType: import("@/lib/accounting/pago-fiscal").InvoiceType | null;
+  posNumber: string;
+  invoiceNumber: string;
+  supplierCuit: string;
+  supplierName: string;
+  supplierVatCondition: import("@/lib/accounting/pago-fiscal").SupplierVatCondition | null;
+  invoiceDate: string | null;
+  paymentDate: string;
+  totalAmount: number;
+  netTaxedAmount: number;
+  vat21Amount: number;
+  vat105Amount: number;
+  vat27Amount: number;
+  exemptAmount: number;
+  vatPerceptionAmount: number;
+  grossIncomePerceptionAmount: number;
+  otherTaxesAmount: number;
+  accountingCategory: import("@/lib/accounting/pago-fiscal").AccountingCategory | null;
+  paymentMethod: string | null;
+  paidBy: import("@/lib/accounting/pago-fiscal").PaidBy | null;
+  isVatComputable: boolean;
+  isIncomeTaxDeductible: boolean;
+  issuedToCompany: boolean | null;
+  pdfStoragePath: string | null;
+  notes: string;
+};

@@ -4,8 +4,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArcaTab, ContabTabBar, TabPageIntro, type TabId } from "./contabilidad-shell";
 import { periodLabel as formatPeriodLabel } from "./contabilidad-tabs";
+import {
+  PagoForm,
+  buildPagoSubmitBody,
+  emptyPagoForm,
+  pagoFormFromExtract,
+  pagoFormFromRecord,
+  type PagoFormState,
+} from "./pago-form";
+import { AuditoriaIvaTab } from "./auditoria-iva-tab";
 import { DASHBOARD_TOKEN_STORAGE_KEY } from "@/lib/dashboard-session";
 import { fechaFieldToUi } from "@/lib/accounting/serialize";
+import { ARCA_ARCHIVO_IDS, ARCA_FILE_NAMES, type ArcaArchivoId } from "@/lib/arca-export/constants";
 
 const MONTHS = [
   { v: "1", label: "Enero" },
@@ -262,47 +272,78 @@ export default function ContabilidadPage() {
     await Notification.requestPermission();
   };
 
-  const descargaZipArcaLibro = useCallback(async () => {
-    if (!token) return;
-    const yNum = parseInt(year, 10);
-    const mNum = parseInt(month, 10);
-    setExportingZip(true);
-    try {
+  const descargaArcaArchivo = useCallback(
+    async (archivo: ArcaArchivoId): Promise<boolean> => {
+      if (!token) return false;
+      const yNum = parseInt(year, 10);
+      const mNum = parseInt(month, 10);
       const res = await fetch(
-        `/api/accounting/export-libro-iva?year=${encodeURIComponent(String(yNum))}&month=${encodeURIComponent(String(mNum))}`,
-        { headers: authHeader },
+        `/api/accounting/export-libro-iva?year=${encodeURIComponent(String(yNum))}&month=${encodeURIComponent(String(mNum))}&archivo=${archivo}`,
+        { headers: authHeader }
       );
       if (res.status === 401) {
         sessionStorage.removeItem(DASHBOARD_TOKEN_STORAGE_KEY);
         setToken(null);
-        return;
+        return false;
       }
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try {
-          const j = (await res.json()) as { detalle?: string; error?: string };
+          const j = (await res.json()) as { detalle?: string; error?: string; validation?: { warnings?: string[] } };
           msg = j.detalle ?? j.error ?? msg;
+          if (j.validation?.warnings?.length) {
+            msg += "\n\n" + j.validation.warnings.join("\n");
+          }
         } catch {
           //
         }
         alert(msg);
-        return;
+        return false;
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `libroiva_ARCA_${yNum}-${String(mNum).padStart(2, "0")}.zip`;
+      const names: Record<ArcaArchivoId, string> = {
+        compras_cbte: ARCA_FILE_NAMES.comprasCbte,
+        compras_ali: ARCA_FILE_NAMES.comprasAli,
+        ventas_cbte: ARCA_FILE_NAMES.ventasCbte,
+        ventas_ali: ARCA_FILE_NAMES.ventasAli,
+      };
+      a.download = names[archivo];
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      alert("Error descargando el ZIP ARCA.");
+      return true;
+    },
+    [token, year, month, authHeader]
+  );
+
+  const descargaArcaArchivoWrapped = useCallback(
+    async (archivo: ArcaArchivoId) => {
+      setExportingZip(true);
+      try {
+        await descargaArcaArchivo(archivo);
+      } finally {
+        setExportingZip(false);
+      }
+    },
+    [descargaArcaArchivo]
+  );
+
+  const descargaArcaTodos = useCallback(async () => {
+    setExportingZip(true);
+    try {
+      for (const id of ARCA_ARCHIVO_IDS) {
+        const ok = await descargaArcaArchivo(id);
+        if (!ok) break;
+        await new Promise((r) => setTimeout(r, 400));
+      }
     } finally {
       setExportingZip(false);
     }
-  }, [token, year, month, authHeader]);
+  }, [descargaArcaArchivo]);
 
   const refreshAll = async () => {
     await Promise.all([loadResumen(), loadLists()]);
@@ -432,8 +473,10 @@ export default function ContabilidadPage() {
           <ArcaTab
             month={month}
             year={year}
-            exportingZip={exportingZip}
-            descargaZipArcaLibro={descargaZipArcaLibro}
+            authHeader={authHeader}
+            exporting={exportingZip}
+            onDownloadArchivo={(id) => void descargaArcaArchivoWrapped(id)}
+            onDownloadTodos={() => void descargaArcaTodos()}
             solicitarAlertasEscritorio={solicitarAlertasEscritorio}
             ultimoDigitoInput={ultimoDigitoInput}
             setUltimoDigitoInput={setUltimoDigitoInput}
@@ -443,6 +486,9 @@ export default function ContabilidadPage() {
             libroAviso={libroAviso}
             libroItems={libroItems}
           />
+        )}
+        {tab === "auditoria" && (
+          <AuditoriaIvaTab authHeader={authHeader} year={year} month={month} qh={qh} />
         )}
       </div>
     </div>
@@ -887,8 +933,9 @@ function AccountingPdfAiCard(props: {
   authHeader: HeadersInit;
   mode: "factura" | "pago";
   onDone: () => Promise<void>;
+  onPagoExtracted?: (extracted: Record<string, unknown>, receiverCuit?: string | null) => void;
 }) {
-  const { authHeader, mode, onDone } = props;
+  const { authHeader, mode, onDone, onPagoExtracted } = props;
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [tipoLibro, setTipoLibro] = useState<"venta" | "compra">("venta");
@@ -903,6 +950,7 @@ function AccountingPdfAiCard(props: {
     fd.append("pdf", file);
     fd.append("tipo", mode === "factura" ? "factura" : "pago");
     if (mode === "factura") fd.append("tipoLibro", tipoLibro);
+    if (mode === "pago") fd.append("autoSave", "false");
 
     setBusy(true);
     try {
@@ -911,9 +959,19 @@ function AccountingPdfAiCard(props: {
         headers: authHeader,
         body: fd,
       });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        kind?: string;
+        extracted?: Record<string, unknown>;
+        receiverCuit?: string;
+      };
       if (!res.ok) {
         alert(typeof j?.error === "string" ? j.error : `Error HTTP ${res.status}`);
+        return;
+      }
+      if (mode === "pago" && j.kind === "pago_preview" && j.extracted && onPagoExtracted) {
+        onPagoExtracted(j.extracted, j.receiverCuit ?? null);
+        alert("PDF analizado. Revisá y guardá el formulario de gasto.");
         return;
       }
       await onDone();
@@ -944,7 +1002,9 @@ function AccountingPdfAiCard(props: {
     >
       <h3 className="font-medium text-zinc-800 dark:text-zinc-100 mb-1">PDF + IA → base de datos</h3>
       <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-        El archivo se sube a Firebase Storage; Google AI (Gemini) lee el PDF y genera el registro en Firestore.
+        {mode === "pago"
+          ? "El PDF se sube a Storage; Gemini extrae datos fiscales y completa el formulario para revisión manual antes de guardar."
+          : "El archivo se sube a Firebase Storage; Google AI (Gemini) lee el PDF y genera el registro en Firestore."}
       </p>
       {mode === "factura" ? (
         <label className="flex flex-col gap-1 text-sm mb-4 max-w-xs">
@@ -1566,234 +1626,188 @@ function PagosTab(props: {
 }) {
   const { authHeader, pagos, onRefresh, qh } = props;
 
-  type F = {
-    fecha: string;
-    importe: string;
-    concepto: string;
-    proveedor: string;
-    medio: string;
-    facturaId: string;
-    observaciones: string;
-  };
-  const [form, setForm] = useState<F>({
-    fecha: new Date().toISOString().slice(0, 10),
-    importe: "",
-    concepto: "",
-    proveedor: "",
-    medio: "transferencia",
-    facturaId: "",
-    observaciones: "",
-  });
+  const [form, setForm] = useState<PagoFormState>(emptyPagoForm);
   const [editId, setEditId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [receiverCuitDetected, setReceiverCuitDetected] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const resetForm = () => {
+    setEditId(null);
+    setReceiverCuitDetected(null);
+    setForm(emptyPagoForm());
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const importe = Number(String(form.importe).replace(",", "."));
-    if (!Number.isFinite(importe) || importe < 0) return;
     setSaving(true);
     try {
-      const body = {
-        fecha: form.fecha,
-        importe,
-        concepto: form.concepto.trim(),
-        proveedor: form.proveedor.trim() || undefined,
-        medio: form.medio || undefined,
-        facturaId: form.facturaId.trim() || undefined,
-        observaciones: form.observaciones.trim() || undefined,
-      };
+      const body = buildPagoSubmitBody(form);
       const url = editId ? `/api/accounting/pagos/${editId}` : "/api/accounting/pagos";
       const res = await fetch(url, {
         method: editId ? "PATCH" : "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const err = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert("Error guardando pago");
+        const details = err?.details?.fieldErrors;
+        const msg =
+          typeof err?.error === "string"
+            ? err.error
+            : details
+              ? Object.values(details).flat().join("; ")
+              : "Error guardando pago";
+        alert(msg);
         return;
       }
-      setEditId(null);
-      setForm({
-        fecha: new Date().toISOString().slice(0, 10),
-        importe: "",
-        concepto: "",
-        proveedor: "",
-        medio: "transferencia",
-        facturaId: "",
-        observaciones: "",
-      });
+      resetForm();
+      setFormOpen(false);
       await onRefresh();
     } finally {
       setSaving(false);
     }
   };
 
+  const handlePagoExtracted = (extracted: Record<string, unknown>, receiverCuit?: string | null) => {
+    setForm(pagoFormFromExtract(extracted));
+    setReceiverCuitDetected(receiverCuit ?? null);
+    setEditId(null);
+    setFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <div className="space-y-6">
       <TabPageIntro
-        title="Pagos"
-        description="Salidas y gastos del mes. Para PDF de comprobantes o extracto bancario, usá Importar."
+        title="Pagos / Gastos"
+        description="Egresos con clasificación impositiva y contable. Los gastos con Factura A e IVA computable entran al Libro IVA Compras al exportar."
       />
-      <CollapsibleSection title="PDF + IA (un gasto por archivo)" subtitle="Gemini lee el comprobante" defaultOpen={false}>
+      <CollapsibleSection title="PDF + IA (factura de gasto)" subtitle="Extrae datos fiscales — revisión manual" defaultOpen={false}>
         <div className="pt-4">
-          <AccountingPdfAiCard authHeader={authHeader} mode="pago" onDone={onRefresh} />
+          <AccountingPdfAiCard
+            authHeader={authHeader}
+            mode="pago"
+            onDone={onRefresh}
+            onPagoExtracted={handlePagoExtracted}
+          />
         </div>
       </CollapsibleSection>
       <CollapsibleSection
-        title={editId ? "Editar pago" : "Registrar pago manual"}
-        subtitle="Alta o edición de un egreso"
-        defaultOpen={Boolean(editId)}
+        title={editId ? "Editar gasto" : "Registrar gasto"}
+        subtitle="Datos fiscales, IVA y contabilidad"
+        defaultOpen={formOpen || Boolean(editId)}
         badge={editId ? "editando" : undefined}
       >
-      <form className="grid sm:grid-cols-2 gap-4 pt-4" onSubmit={submit}>
-        <label className="flex flex-col gap-1 text-sm">
-          Fecha
-          <input
-            type="date"
-            required
-            value={form.fecha}
-            onChange={(e) => setForm((s) => ({ ...s, fecha: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Importe
-          <input
-            required
-            value={form.importe}
-            onChange={(e) => setForm((s) => ({ ...s, importe: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          Concepto
-          <input
-            required
-            value={form.concepto}
-            onChange={(e) => setForm((s) => ({ ...s, concepto: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Proveedor / destinatario
-          <input
-            value={form.proveedor}
-            onChange={(e) => setForm((s) => ({ ...s, proveedor: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Medio
-          <select
-            value={form.medio}
-            onChange={(e) => setForm((s) => ({ ...s, medio: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          >
-            <option value="transferencia">Transferencia</option>
-            <option value="efectivo">Efectivo</option>
-            <option value="cheque">Cheque</option>
-            <option value="tarjeta">Tarjeta</option>
-            <option value="otro">Otro</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          Id factura (opcional)
-          <input
-            value={form.facturaId}
-            onChange={(e) => setForm((s) => ({ ...s, facturaId: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 font-mono text-xs"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          Observaciones
-          <textarea
-            rows={2}
-            value={form.observaciones}
-            onChange={(e) => setForm((s) => ({ ...s, observaciones: e.target.value }))}
-            className="rounded-lg border px-3 py-2 bg-white dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600"
-          />
-        </label>
-        <div className="sm:col-span-2 flex gap-3">
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-lg bg-emerald-600 text-white px-5 py-2 font-medium hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {saving ? "Guardando…" : editId ? "Actualizar" : "Guardar"}
-          </button>
-          {editId && (
-            <button type="button" className="border rounded-lg px-5 py-2" onClick={() => setEditId(null)}>
-              Cancelar
-            </button>
-          )}
-        </div>
-      </form>
+        <PagoForm
+          form={form}
+          setForm={setForm}
+          editId={editId}
+          saving={saving}
+          onSubmit={submit}
+          onCancel={() => {
+            resetForm();
+            setFormOpen(false);
+          }}
+          receiverCuitDetected={receiverCuitDetected}
+        />
       </CollapsibleSection>
 
       <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
-        <table className="w-full text-sm min-w-[620px]">
+        <table className="w-full text-sm min-w-[820px]">
           <thead>
             <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
-              <th className="text-left py-3 px-3">Fecha</th>
+              <th className="text-left py-3 px-3">Fecha pago</th>
               <th className="text-left py-3 px-3">Proveedor</th>
               <th className="text-left py-3 px-3">Concepto</th>
+              <th className="text-left py-3 px-3">Comprobante</th>
+              <th className="text-center py-3 px-3">IVA</th>
               <th className="text-right py-3 px-3">Importe</th>
               <th className="text-left py-3 px-3"></th>
             </tr>
           </thead>
           <tbody>
-            {pagos.map((row) => {
-              const pid = String(row.id ?? "");
-              return (
-                <tr key={pid} className="border-b border-zinc-100 dark:border-zinc-700/50">
-                  <td className="py-2 px-3 font-mono">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
-                  <td className="py-2 px-3">{String(row.proveedor ?? "—")}</td>
-                  <td className="py-2 px-3">
-                    {String(row.concepto ?? "")}
-                    {row.bankReference ? (
-                      <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
-                        Banco
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="py-2 px-3 text-right">{money(Number(row.importe) || 0)}</td>
-                  <td className="py-2 px-3 space-x-2">
-                    <button
-                      type="button"
-                      className="text-emerald-600 hover:underline"
-                      onClick={() => {
-                        setEditId(pid);
-                        setForm({
-                          fecha: fechaFieldToUi(String(row.fecha ?? "")),
-                          importe: String(row.importe ?? ""),
-                          concepto: String(row.concepto ?? ""),
-                          proveedor: String(row.proveedor ?? ""),
-                          medio: String(row.medio ?? "transferencia"),
-                          facturaId: String(row.facturaId ?? ""),
-                          observaciones: String(row.observaciones ?? ""),
-                        });
-                      }}
-                    >
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      className="text-red-600 hover:underline"
-                      onClick={async () => {
-                        if (!confirm("¿Eliminar?")) return;
-                        await fetch(`/api/accounting/pagos/${pid}`, {
-                          method: "DELETE",
-                          headers: authHeader,
-                        });
-                        await onRefresh();
-                      }}
-                    >
-                      Eliminar
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {pagos.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  <EmptyListHint message="No hay gastos en este mes. Cargá con PDF + IA o alta manual." />
+                </td>
+              </tr>
+            ) : (
+              pagos.map((row) => {
+                const pid = String(row.id ?? "");
+                const invoiceLabel =
+                  row.invoiceType === "factura_a"
+                    ? "FA"
+                    : row.invoiceType === "factura_b"
+                      ? "FB"
+                      : row.invoiceType
+                        ? String(row.invoiceType).slice(0, 6)
+                        : "—";
+                return (
+                  <tr key={pid} className="border-b border-zinc-100 dark:border-zinc-700/50">
+                    <td className="py-2 px-3 font-mono text-xs">
+                      {fechaFieldToUi(String(row.paymentDate ?? row.fecha ?? ""))}
+                    </td>
+                    <td className="py-2 px-3 max-w-[140px] truncate" title={String(row.supplierName ?? row.proveedor ?? "")}>
+                      {String(row.supplierName ?? row.proveedor ?? "—")}
+                    </td>
+                    <td className="py-2 px-3">
+                      {String(row.concepto ?? "")}
+                      {row.bankReference ? (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
+                          Banco
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-xs">
+                      {row.posNumber || row.invoiceNumber
+                        ? `${String(row.posNumber ?? "")}-${String(row.invoiceNumber ?? "")}`
+                        : invoiceLabel}
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      {row.isVatComputable === true ? (
+                        <span className="text-[10px] uppercase font-medium text-emerald-600 dark:text-emerald-400">
+                          CF
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-right">{money(Number(row.totalAmount ?? row.importe) || 0)}</td>
+                    <td className="py-2 px-3 space-x-2">
+                      <button
+                        type="button"
+                        className="text-emerald-600 hover:underline"
+                        onClick={() => {
+                          setEditId(pid);
+                          setForm(pagoFormFromRecord(row));
+                          setReceiverCuitDetected(null);
+                          setFormOpen(true);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="text-red-600 hover:underline"
+                        onClick={async () => {
+                          if (!confirm("¿Eliminar?")) return;
+                          await fetch(`/api/accounting/pagos/${pid}`, {
+                            method: "DELETE",
+                            headers: authHeader,
+                          });
+                          await onRefresh();
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
         <p className="text-xs text-zinc-500 p-4">Filtrado: {qh()}</p>

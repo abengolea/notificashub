@@ -3,6 +3,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
 import { ACCOUNTING_COMPANY_NAME, ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { buildIvaAuditReport, pagosComprasForPeriodWithFallback } from "@/lib/accounting/iva-audit";
 
 function bounds(year: number, month: number): { start: Timestamp; end: Timestamp } {
   const startD = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
@@ -76,10 +77,19 @@ export async function GET(req: NextRequest) {
     }
     let pagosSum = 0;
     for (const doc of pagSnap.docs) {
-      pagosSum += Number(doc.data().importe) || 0;
+      pagosSum += Number(doc.data().totalAmount ?? doc.data().importe) || 0;
     }
 
-    const ivaSaldoOrientativo = ventasIva - comprasIva;
+    const pagosDocs = pagSnap.docs.map((d) => ({ id: d.id, data: () => d.data() }));
+    const pagosIva = pagosComprasForPeriodWithFallback(pagosDocs, y, m);
+    const auditReport = buildIvaAuditReport(pagosDocs, y, m);
+
+    const comprasNetoTotal = comprasNeto + pagosIva.netoGravado;
+    const comprasIvaTotal = comprasIva + pagosIva.ivaCredito21 + pagosIva.ivaCredito105 + pagosIva.ivaCredito27;
+    const comprasTotalSum =
+      comprasTotal + pagosIva.netoGravado + pagosIva.ivaCredito21 + pagosIva.ivaCredito105 + pagosIva.ivaCredito27;
+
+    const ivaSaldoOrientativo = ventasIva - comprasIvaTotal;
     const resultadoCajaOrientativo = cobrosSum - pagosSum;
 
     return NextResponse.json({
@@ -90,7 +100,14 @@ export async function GET(req: NextRequest) {
       pagosRegistrados: pagSnap.docs.length,
       iva: {
         debitoVentas: { netoGravado: ventasNeto, iva: ventasIva, totalFacturado: ventasTotal },
-        creditoCompras: { netoGravado: comprasNeto, iva: comprasIva, totalFacturado: comprasTotal },
+        creditoCompras: {
+          netoGravado: comprasNetoTotal,
+          iva: comprasIvaTotal,
+          totalFacturado: comprasTotalSum,
+          desdeFacturas: { netoGravado: comprasNeto, iva: comprasIva, count: factSnap.docs.filter((d) => d.data().tipo === "compra").length },
+          desdePagosGastos: auditReport.resumen,
+        },
+        auditoriaIva: auditReport.resumen,
         diferenciaIVAOrientativa: ivaSaldoOrientativo,
       },
       tesoreria: {

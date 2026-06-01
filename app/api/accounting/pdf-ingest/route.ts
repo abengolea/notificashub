@@ -3,7 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
-import { extractFacturaFromPdf, extractPagoFromPdf } from "@/lib/accounting/pdf-ai-extract";
+import { extractFacturaFromPdf, extractPagoFiscalFromPdf } from "@/lib/accounting/pdf-ai-extract";
 import { facturaBodySchema, pagoBodySchema } from "@/lib/accounting/schemas";
 import { uploadAccountingPdf } from "@/lib/accounting/storage-pdf";
 import { requireDashboard } from "@/lib/require-dashboard";
@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
 
   const tipoLibroRaw = String(form.get("tipoLibro") ?? "venta").trim().toLowerCase();
   const tipoLibro = tipoLibroRaw === "compra" ? "compra" : "venta";
+
+  const autoSaveRaw = String(form.get("autoSave") ?? "true").trim().toLowerCase();
+  const autoSave = autoSaveRaw !== "false" && autoSaveRaw !== "0";
 
   const file = form.get("pdf");
   if (!file || !(file instanceof Blob)) {
@@ -150,25 +153,66 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const extracted = await extractPagoFromPdf({
+    const extracted = await extractPagoFiscalFromPdf({
       pdfBase64,
       filename: originalName,
     });
 
-    const parsed = pagoBodySchema.safeParse({
-      fecha: extracted.fecha,
-      importe: extracted.importe,
+    const paymentDate = extracted.paymentDate ?? extracted.fecha;
+    const observacionesMerged = [extracted.observaciones?.trim(), pdfObservacionesNote(storagePath)]
+      .filter(Boolean)
+      .join("\n");
+
+    const draftBody = {
+      fecha: paymentDate,
+      importe: extracted.totalAmount || extracted.importe,
       concepto: extracted.concepto,
-      proveedor: extracted.proveedor,
+      proveedor: extracted.proveedor ?? extracted.supplierName,
       medio: extracted.medio,
-      observaciones: extracted.observaciones,
-    });
+      observaciones: observacionesMerged || undefined,
+      invoiceType: extracted.invoiceType ?? null,
+      posNumber: extracted.posNumber,
+      invoiceNumber: extracted.invoiceNumber,
+      supplierCuit: extracted.supplierCuit,
+      supplierName: extracted.supplierName ?? extracted.proveedor,
+      supplierVatCondition: extracted.supplierVatCondition ?? null,
+      invoiceDate: extracted.invoiceDate ?? null,
+      paymentDate,
+      totalAmount: extracted.totalAmount || extracted.importe,
+      netTaxedAmount: extracted.netTaxedAmount,
+      vat21Amount: extracted.vat21Amount,
+      vat105Amount: extracted.vat105Amount,
+      vat27Amount: extracted.vat27Amount,
+      exemptAmount: extracted.exemptAmount,
+      vatPerceptionAmount: extracted.vatPerceptionAmount,
+      grossIncomePerceptionAmount: extracted.grossIncomePerceptionAmount,
+      otherTaxesAmount: extracted.otherTaxesAmount,
+      paymentMethod: extracted.medio,
+      isVatComputable: extracted.isVatComputable,
+      isIncomeTaxDeductible: false,
+      issuedToCompany: extracted.issuedToCompany,
+      pdfStoragePath: storagePath,
+      notes: observacionesMerged || undefined,
+    };
+
+    if (!autoSave) {
+      return NextResponse.json({
+        kind: "pago_preview",
+        pdfStoragePath: storagePath,
+        extracted: draftBody,
+        receiverCuit: extracted.receiverCuit,
+        receiverName: extracted.receiverName,
+      });
+    }
+
+    const parsed = pagoBodySchema.safeParse(draftBody);
 
     if (!parsed.success) {
       return NextResponse.json(
         {
           error: "La IA extrajo datos que no pasan validación",
           pdfStoragePath: storagePath,
+          extracted: draftBody,
           details: parsed.error.flatten(),
         },
         { status: 422 }
@@ -176,20 +220,42 @@ export async function POST(req: NextRequest) {
     }
 
     const row = parsed.data;
-    const observacionesMerged = [row.observaciones?.trim(), pdfObservacionesNote(storagePath)]
-      .filter(Boolean)
-      .join("\n");
 
     const ref = await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
       empresa: "notificas_srl",
-      fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.fecha)),
-      importe: row.importe,
+      fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.paymentDate ?? row.fecha)),
+      importe: row.totalAmount ?? row.importe,
       concepto: row.concepto,
-      medio: row.medio ?? null,
-      proveedor: row.proveedor ?? null,
+      medio: row.paymentMethod ?? row.medio ?? null,
+      proveedor: row.supplierName ?? row.proveedor ?? null,
       facturaId: null,
-      observaciones: observacionesMerged.length > 0 ? observacionesMerged : null,
+      observaciones: row.notes ?? row.observaciones ?? null,
+      invoiceType: row.invoiceType ?? null,
+      posNumber: row.posNumber ?? null,
+      invoiceNumber: row.invoiceNumber ?? null,
+      supplierCuit: row.supplierCuit ?? null,
+      supplierName: row.supplierName ?? row.proveedor ?? null,
+      supplierVatCondition: row.supplierVatCondition ?? null,
+      invoiceDate: row.invoiceDate
+        ? Timestamp.fromDate(dateOnlyToUtcMidday(row.invoiceDate))
+        : null,
+      paymentDate: Timestamp.fromDate(dateOnlyToUtcMidday(row.paymentDate ?? row.fecha)),
+      totalAmount: row.totalAmount ?? row.importe,
+      netTaxedAmount: row.netTaxedAmount ?? 0,
+      vat21Amount: row.vat21Amount ?? 0,
+      vat105Amount: row.vat105Amount ?? 0,
+      vat27Amount: row.vat27Amount ?? 0,
+      exemptAmount: row.exemptAmount ?? 0,
+      vatPerceptionAmount: row.vatPerceptionAmount ?? 0,
+      grossIncomePerceptionAmount: row.grossIncomePerceptionAmount ?? 0,
+      otherTaxesAmount: row.otherTaxesAmount ?? 0,
+      paymentMethod: row.paymentMethod ?? row.medio ?? null,
+      paidBy: row.paidBy ?? null,
+      isVatComputable: row.isVatComputable === true,
+      isIncomeTaxDeductible: row.isIncomeTaxDeductible === true,
+      issuedToCompany: row.issuedToCompany ?? null,
       pdfStoragePath: storagePath,
+      notes: row.notes ?? row.observaciones ?? null,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
