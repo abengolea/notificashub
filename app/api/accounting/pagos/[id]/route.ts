@@ -5,6 +5,7 @@ import { requireDashboard } from "@/lib/require-dashboard";
 import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { pagoBodySchema } from "@/lib/accounting/schemas";
+import { pagoBodyToFirestore, pagoFirestoreWithTimestamps } from "@/lib/accounting/pago-persist";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -34,14 +35,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const snap = await ref.get();
     if (!snap.exists) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
+    const fsRow = pagoBodyToFirestore(row);
+    const paymentDate = row.paymentDate ?? row.fecha;
+    const paymentTs = Timestamp.fromDate(dateOnlyToUtcMidday(paymentDate));
+    const doc = pagoFirestoreWithTimestamps(fsRow, paymentTs);
+
     await ref.update({
-      fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.fecha)),
-      importe: row.importe,
-      concepto: row.concepto,
-      medio: row.medio ?? null,
-      proveedor: row.proveedor ?? null,
-      facturaId: row.facturaId ?? null,
-      observaciones: row.observaciones ?? null,
+      ...doc,
       updatedAt: FieldValue.serverTimestamp(),
     });
 

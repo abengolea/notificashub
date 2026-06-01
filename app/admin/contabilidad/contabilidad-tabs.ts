@@ -1,4 +1,4 @@
-export type TabId = "panel" | "cobros" | "pagos" | "facturas" | "importar" | "arca";
+export type TabId = "panel" | "cobros" | "pagos" | "facturas" | "importar" | "arca" | "auditoria";
 
 export const CONTAB_TABS: { id: TabId; label: string; hint: string; group: "operacion" | "impuestos" }[] = [
   { id: "panel", label: "Panel", hint: "Resumen del mes", group: "operacion" },
@@ -7,6 +7,7 @@ export const CONTAB_TABS: { id: TabId; label: string; hint: string; group: "oper
   { id: "facturas", label: "Facturas", hint: "Compras y ventas", group: "operacion" },
   { id: "importar", label: "Importar", hint: "Banco y Mercado Pago", group: "operacion" },
   { id: "arca", label: "ARCA / IVA", hint: "Libro y vencimientos", group: "impuestos" },
+  { id: "auditoria", label: "Auditoría IVA", hint: "Diagnóstico compras", group: "impuestos" },
 ];
 
 export function periodLabel(

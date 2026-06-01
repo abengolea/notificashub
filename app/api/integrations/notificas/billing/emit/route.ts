@@ -280,6 +280,12 @@ export async function POST(req: NextRequest) {
       body.item.planName?.trim() ||
       (body.item.credits ? `Compra de ${body.item.credits} envíos Notificas` : "Compra Notificas");
 
+    const sourceApp =
+      typeof body.metadata?.source_app === "string" ? body.metadata.source_app.trim() : "";
+    const sourceLabel =
+      sourceApp === "legalmev" ? "LegalMev" : sourceApp === "notificas" ? "Notificas" : "Notificas";
+    const sourceSystem = sourceApp === "legalmev" ? "legalmev" : "notificas";
+
     const batch = db.batch();
     batch.set(facturaRef, {
       empresa: "notificas_srl",
@@ -299,8 +305,8 @@ export async function POST(req: NextRequest) {
       total: montos.total,
       cae: cae.data.cae,
       caeFchVto: cae.data.caeFchVto,
-      observaciones: `${concepto}\nOrigen: Notificas · paymentId ${body.paymentId}`,
-      sourceSystem: "notificas",
+      observaciones: `${concepto}\nOrigen: ${sourceLabel} · paymentId ${body.paymentId}`,
+      sourceSystem,
       sourcePaymentId: body.paymentId,
       sourceTransactionId: body.transactionId ?? null,
       sourcePreferenceId: body.preferenceId ?? null,

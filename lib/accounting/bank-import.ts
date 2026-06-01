@@ -101,6 +101,13 @@ export async function persistBankMovements(params: {
         await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
           ...base,
           proveedor: null,
+          isVatComputable: false,
+          issuedToCompany: null,
+          netTaxedAmount: 0,
+          vat21Amount: 0,
+          vat105Amount: 0,
+          vat27Amount: 0,
+          totalAmount: base.importe,
         });
         importedPagos += 1;
       }
