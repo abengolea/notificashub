@@ -2,10 +2,14 @@
  * Crea o vincula cobros para facturas venta emitidas desde Mercado Pago (sourcePaymentId).
  *
  * Uso:
- *   npx tsx scripts/backfill-mp-cobros.ts              # todas las facturas MP
- *   npx tsx scripts/backfill-mp-cobros.ts 2026 5       # solo facturas de mayo 2026
- *   npx tsx scripts/backfill-mp-cobros.ts --dry-run    # simular sin escribir
+ *   npm run backfill:mp-cobros
+ *   npm run backfill:mp-cobros -- 2026 5
+ *   npm run backfill:mp-cobros -- --dry-run
+ *
+ * Credenciales: GOOGLE_APPLICATION_CREDENTIALS en .env.local o el JSON
+ * studio-3864746689-59018-firebase-adminsdk-*.json en la raíz del repo.
  */
+import "./load-local-env";
 import { db } from "@/lib/firebase-admin";
 import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
 import {
@@ -114,6 +118,15 @@ async function main() {
 }
 
 main().catch((e) => {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes("Could not load the default credentials")) {
+    console.error(
+      "\nNo se encontraron credenciales Firebase Admin.\n" +
+        "Opciones:\n" +
+        "  1. Descomentar GOOGLE_APPLICATION_CREDENTIALS en .env.local apuntando al JSON\n" +
+        "  2. Dejar el archivo studio-3864746689-59018-firebase-adminsdk-*.json en la raíz del repo\n"
+    );
+  }
   console.error(e);
   process.exit(1);
 });
