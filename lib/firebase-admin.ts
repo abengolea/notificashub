@@ -1,7 +1,7 @@
 import { getApps, initializeApp, cert, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 
 // Firebase Admin SDK - solo se ejecuta en el servidor (API routes, Server Components, etc.)
 // Local: usa archivo de credenciales. Producción (Cloud Run): Application Default Credentials
@@ -9,15 +9,35 @@ import { existsSync } from "node:fs";
 
 const PROJECT_ID = "studio-3864746689-59018";
 
+function resolveCredentialsPath(): string | null {
+  const fromEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+
+  const legacyDefault = path.join(process.cwd(), `${PROJECT_ID}-firebase-adminsdk-fbsvc-5cdc673866.json`);
+  if (existsSync(legacyDefault)) return legacyDefault;
+
+  try {
+    const matches = readdirSync(process.cwd()).filter(
+      (name) => name.startsWith(`${PROJECT_ID}-firebase-adminsdk-`) && name.endsWith(".json")
+    );
+    if (matches.length === 1) {
+      return path.join(process.cwd(), matches[0]!);
+    }
+  } catch {
+    //
+  }
+
+  if (fromEnv) return fromEnv;
+  return null;
+}
+
 function getAdminApp(): App {
   const existingApps = getApps();
   if (existingApps.length > 0) {
     return existingApps[0] as App;
   }
 
-  const credentialsPath =
-    process.env.GOOGLE_APPLICATION_CREDENTIALS ??
-    path.join(process.cwd(), `${PROJECT_ID}-firebase-adminsdk-fbsvc-5cdc673866.json`);
+  const credentialsPath = resolveCredentialsPath();
 
   const storageBucket =
     process.env.FIREBASE_STORAGE_BUCKET ||
@@ -26,7 +46,7 @@ function getAdminApp(): App {
 
   // Intentar credenciales de archivo; si falla, usar Application Default Credentials (deploy)
   try {
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || existsSync(credentialsPath)) {
+    if (credentialsPath && existsSync(credentialsPath)) {
       return initializeApp({
         credential: cert(credentialsPath),
         projectId: PROJECT_ID,
