@@ -10,6 +10,12 @@ import { getWsaaTaForWsfe } from "@/lib/afip/wsaa";
 import { feCompUltimoAutorizado, feCAESolicitar } from "@/lib/afip/wsfe";
 import { armarDataCreateNextVoucher, cbteTipoDesdeLetra } from "@/lib/afip/wsfe-voucher";
 import { getAfipPtoVtaDefaultFromEnv } from "@/lib/afip/issuer-env";
+import {
+  ensureCobroForMpFactura,
+  formatFacturaVentaLabel,
+  observacionesCobroMpFactura,
+} from "@/lib/accounting/cobro-mp";
+import { toIso } from "@/lib/accounting/serialize";
 
 export const runtime = "nodejs";
 
@@ -119,6 +125,11 @@ function compradorDocumento(body: EmitBody): { docTipo: number; docNro: number; 
   return { docTipo: 99, docNro: 0, cuitDigits: "" };
 }
 
+function sourceSystemFromBody(body: EmitBody): string {
+  const sourceApp = typeof body.metadata?.source_app === "string" ? body.metadata.source_app.trim() : "";
+  return sourceApp === "legalmev" ? "legalmev" : "notificas";
+}
+
 async function reserveRequest(requestId: string) {
   const ref = db.collection(REQUESTS_COLLECTION).doc(requestId);
   const now = Date.now();
@@ -189,10 +200,44 @@ export async function POST(req: NextRequest) {
       ? await db.collection(ACCOUNTING_COLLECTIONS.facturas).doc(reservation.facturaId).get()
       : null;
     const factura = facturaSnap?.exists ? facturaSnap.data() : undefined;
+    let cobroId: string | undefined;
+    let cobroCreated = false;
+    if (reservation.facturaId && factura) {
+      const facturaLabel = formatFacturaVentaLabel({
+        tipoComprobante: String(factura.tipoComprobante ?? "B"),
+        puntoVenta: String(factura.puntoVenta ?? ""),
+        numero: String(factura.numero ?? ""),
+      });
+      const sourceSystem = String(factura.sourceSystem ?? sourceSystemFromBody(body));
+      const sourceLabel =
+        sourceSystem === "legalmev" ? "LegalMev" : sourceSystem === "notificas" ? "Notificas" : undefined;
+      const fechaYmd =
+        (factura.fecha ? toIso(factura.fecha)?.slice(0, 10) : null) ?? body.fecha ?? todayYmdArgentina();
+      const ensured = await ensureCobroForMpFactura(db, {
+        mercadopagoPaymentId: String(body.paymentId),
+        facturaId: reservation.facturaId,
+        fechaYmd,
+        importe: Number(factura.total) || body.amount,
+        concepto:
+          body.item.description?.trim() ||
+          body.item.planName?.trim() ||
+          (body.item.credits ? `Compra de ${body.item.credits} envíos Notificas` : "Compra Notificas"),
+        medio: "tarjeta",
+        observaciones: observacionesCobroMpFactura({
+          facturaLabel,
+          mercadopagoPaymentId: String(body.paymentId),
+          sourceLabel,
+        }),
+      });
+      cobroId = ensured.cobroId;
+      cobroCreated = ensured.created;
+    }
     return NextResponse.json({
       ok: true,
       alreadyIssued: true,
       facturaId: reservation.facturaId,
+      cobroId,
+      cobroCreated,
       CAE: factura?.cae ?? null,
       CAEFchVto: factura?.caeFchVto ?? null,
       voucherNumber:
@@ -325,10 +370,31 @@ export async function POST(req: NextRequest) {
     });
     await batch.commit();
 
+    const facturaLabel = formatFacturaVentaLabel({
+      tipoComprobante: tipo,
+      puntoVenta: String(ptoVta).padStart(5, "0"),
+      numero: String(cae.data.voucherNumber).padStart(8, "0"),
+    });
+    const ensured = await ensureCobroForMpFactura(db, {
+      mercadopagoPaymentId: String(body.paymentId),
+      facturaId,
+      fechaYmd: fecha,
+      importe: montos.total,
+      concepto: `${concepto} · ${razonSocial}`.slice(0, 512),
+      medio: "tarjeta",
+      observaciones: observacionesCobroMpFactura({
+        facturaLabel,
+        mercadopagoPaymentId: String(body.paymentId),
+        sourceLabel,
+      }),
+    });
+
     return NextResponse.json({
       ok: true,
       alreadyIssued: false,
       facturaId,
+      cobroId: ensured.cobroId,
+      cobroCreated: ensured.created,
       CAE: cae.data.cae,
       CAEFchVto: cae.data.caeFchVto,
       voucherNumber: cae.data.voucherNumber,

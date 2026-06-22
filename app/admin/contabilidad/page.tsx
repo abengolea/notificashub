@@ -460,7 +460,7 @@ export default function ContabilidadPage() {
           </div>
         )}
         {tab === "cobros" && (
-          <CobrosTab authHeader={authHeader} cobros={cobros} onRefresh={loadLists} qh={qh} />
+          <CobrosTab authHeader={authHeader} cobros={cobros} facturas={facturas} onRefresh={loadLists} qh={qh} />
         )}
         {tab === "pagos" && <PagosTab authHeader={authHeader} pagos={pagos} onRefresh={loadLists} qh={qh} />}
         {tab === "facturas" && (
@@ -1384,10 +1384,24 @@ function FacturasTab(props: {
 function CobrosTab(props: {
   authHeader: HeadersInit;
   cobros: Record<string, unknown>[];
+  facturas: Record<string, unknown>[];
   onRefresh: () => Promise<void>;
   qh: () => string;
 }) {
-  const { authHeader, cobros, onRefresh, qh } = props;
+  const { authHeader, cobros, facturas, onRefresh, qh } = props;
+
+  const facturaLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of facturas) {
+      const id = String(f.id ?? "");
+      if (!id) continue;
+      const tipo = String(f.tipoComprobante ?? "B");
+      const pv = String(f.puntoVenta ?? "").replace(/\D/g, "").padStart(5, "0");
+      const nro = String(f.numero ?? "").replace(/\D/g, "").padStart(8, "0");
+      map.set(id, `${tipo} ${pv}-${nro}`);
+    }
+    return map;
+  }, [facturas]);
 
   type F = {
     fecha: string;
@@ -1451,14 +1465,15 @@ function CobrosTab(props: {
     <div className="space-y-6">
       <TabPageIntro
         title="Cobros"
-        description="Entradas de dinero del mes. Para importar banco o Mercado Pago usá la pestaña Importar."
+        description="Entradas de dinero del mes. Al cobrar por Mercado Pago y facturar, el ingreso aparece acá automáticamente vinculado a la factura. También podés importar desde la pestaña Importar o registrar manualmente."
       />
       <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
-        <table className="w-full text-sm min-w-[560px]">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b bg-zinc-50 dark:bg-zinc-900/60">
               <th className="text-left py-3 px-3">Fecha</th>
               <th className="text-left py-3 px-3">Concepto</th>
+              <th className="text-left py-3 px-3">Factura</th>
               <th className="text-right py-3 px-3">Importe</th>
               <th className="text-left py-3 px-3"></th>
             </tr>
@@ -1466,13 +1481,15 @@ function CobrosTab(props: {
           <tbody>
             {cobros.length === 0 ? (
               <tr>
-                <td colSpan={4}>
-                  <EmptyListHint message="No hay cobros en este mes. Importá desde la pestaña Importar o registrá uno manual." />
+                <td colSpan={5}>
+                  <EmptyListHint message="No hay cobros en este mes. Los cobros MP facturados se registran solos; también podés importar desde Importar o cargar uno manual." />
                 </td>
               </tr>
             ) : (
               cobros.map((row) => {
                 const cid = String(row.id ?? "");
+                const facturaId = String(row.facturaId ?? "");
+                const facturaLabel = facturaId ? facturaLabelById.get(facturaId) : undefined;
                 return (
                   <tr key={cid} className="border-b border-zinc-100 dark:border-zinc-700/50">
                     <td className="py-2 px-3 font-mono">{fechaFieldToUi(String(row.fecha ?? ""))}</td>
@@ -1488,6 +1505,17 @@ function CobrosTab(props: {
                           Banco
                         </span>
                       ) : null}
+                    </td>
+                    <td className="py-2 px-3 text-xs">
+                      {facturaLabel ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 font-medium">
+                          {facturaLabel}
+                        </span>
+                      ) : facturaId ? (
+                        <span className="text-zinc-500">ID {facturaId.slice(0, 8)}…</span>
+                      ) : (
+                        <span className="text-zinc-400">—</span>
+                      )}
                     </td>
                     <td className="py-2 px-3 text-right">{money(Number(row.importe) || 0)}</td>
                     <td className="py-2 px-3 space-x-2">

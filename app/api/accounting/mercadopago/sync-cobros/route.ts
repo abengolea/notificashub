@@ -5,6 +5,11 @@ import { requireDashboard } from "@/lib/require-dashboard";
 import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import {
+  cobroInputFromMpPaymentAndFactura,
+  ensureCobroForMpFactura,
+  findFacturaBySourcePaymentId,
+} from "@/lib/accounting/cobro-mp";
+import {
   conceptoFromMpPayment,
   fetchApprovedPaymentsRange,
   medioFromMpPayment,
@@ -71,13 +76,24 @@ export async function POST(req: NextRequest) {
   const col = db.collection(ACCOUNTING_COLLECTIONS.cobros);
   let imported = 0;
   let skipped = 0;
+  let linkedFacturas = 0;
   const errors: string[] = [];
 
   for (const p of payments) {
     const mpId = String(p.id);
     try {
       const dup = await col.where("mercadopagoPaymentId", "==", mpId).limit(1).get();
+      const facturaMatch = await findFacturaBySourcePaymentId(db, mpId);
+
       if (!dup.empty) {
+        const existing = dup.docs[0]!;
+        if (facturaMatch && !existing.data().facturaId) {
+          await existing.ref.update({
+            facturaId: facturaMatch.id,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          linkedFacturas += 1;
+        }
         skipped += 1;
         continue;
       }
@@ -92,6 +108,17 @@ export async function POST(req: NextRequest) {
       const amount = Number(p.transaction_amount);
       if (!Number.isFinite(amount) || amount < 0) {
         errors.push(`Pago ${mpId}: importe inválido`);
+        continue;
+      }
+
+      if (facturaMatch) {
+        const ensured = await ensureCobroForMpFactura(
+          db,
+          cobroInputFromMpPaymentAndFactura(p, facturaMatch, ymd)
+        );
+        if (ensured.created) imported += 1;
+        else skipped += 1;
+        if (ensured.linkedFactura) linkedFacturas += 1;
         continue;
       }
 
@@ -123,6 +150,7 @@ export async function POST(req: NextRequest) {
     fromMercadoPago: payments.length,
     imported,
     skippedDuplicates: skipped,
+    linkedFacturas,
     errors: errors.length ? errors : undefined,
   });
 }

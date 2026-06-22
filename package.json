@@ -27,6 +27,7 @@
     "afip:ping": "tsx scripts/afip-ping.ts",
     "afip:cert-check": "tsx scripts/afip-cert-check.ts",
     "afip:folder-scan": "tsx scripts/afip-folder-scan.ts",
+    "backfill:mp-cobros": "tsx scripts/backfill-mp-cobros.ts",
     "secrets:push": "node scripts/push-apphosting-secrets-from-env.mjs",
     "secrets:push:dry": "node scripts/push-apphosting-secrets-from-env.mjs --dry-run",
     "secrets:keys": "node scripts/push-apphosting-secrets-from-env.mjs --keys",
