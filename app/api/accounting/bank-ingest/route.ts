@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { defaultBankAccountId, normalizeBankExtractRows } from "@/lib/accounting/bank-extract";
 import { enrichWithDuplicateFlags } from "@/lib/accounting/bank-import";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { extractBankExtractFromPdf } from "@/lib/accounting/pdf-ai-extract";
 import { uploadAccountingPdf } from "@/lib/accounting/storage-pdf";
 import { requireDashboard } from "@/lib/require-dashboard";
@@ -13,18 +14,29 @@ export async function POST(req: NextRequest) {
   const denied = await requireDashboard(req);
   if (denied) return denied;
 
-  if (!process.env.GOOGLE_AI_API_KEY?.trim()) {
-    return NextResponse.json(
-      { error: "GOOGLE_AI_API_KEY no configurada en el servidor." },
-      { status: 503 }
-    );
-  }
-
   let form: FormData;
   try {
     form = await req.formData();
   } catch {
     return NextResponse.json({ error: "FormData inválido" }, { status: 400 });
+  }
+
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    form.get("entity")
+  );
+  if (!entity.integrations.bankIngest) {
+    return NextResponse.json(
+      { error: "Importación bancaria solo disponible para Notificas SRL" },
+      { status: 400 }
+    );
+  }
+
+  if (!process.env.GOOGLE_AI_API_KEY?.trim()) {
+    return NextResponse.json(
+      { error: "GOOGLE_AI_API_KEY no configurada en el servidor." },
+      { status: 503 }
+    );
   }
 
   const file = form.get("pdf");
@@ -101,6 +113,7 @@ export async function POST(req: NextRequest) {
         existingKind: m.existingKind,
         existingId: m.existingId,
         selected: !m.duplicate,
+        vepHint: m.vepHint ?? null,
       })),
     });
   } catch (e) {

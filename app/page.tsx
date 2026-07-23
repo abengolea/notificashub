@@ -333,7 +333,7 @@ export default function Home() {
               href="/admin/contabilidad"
               className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
             >
-              Contabilidad (Notificas SRL)
+              Contabilidad
             </a>
             <button
               type="button"

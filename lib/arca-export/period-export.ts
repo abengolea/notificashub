@@ -1,6 +1,10 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
-import { ACCOUNTING_COMPANY_NAME, ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import {
+  DEFAULT_ACCOUNTING_ENTITY_ID,
+  getAccountingEntity,
+  type AccountingEntityId,
+} from "@/lib/accounting/constants";
 import { mergeComprasNormalized, sumComprasResumen } from "@/lib/accounting/iva-compras-export";
 import { buildIvaAuditReport, pagosComprasForPeriodWithFallback } from "@/lib/accounting/iva-audit";
 import {
@@ -43,12 +47,17 @@ function resolverLetraA(n: NormalizedFact): "A" | "B" | "C" | null {
 }
 
 /** Carga facturas + pagos computables y arma TXT del período. */
-export async function loadPeriodExportData(year: number, month: number): Promise<PeriodExportData> {
+export async function loadPeriodExportData(
+  year: number,
+  month: number,
+  entityId: AccountingEntityId = DEFAULT_ACCOUNTING_ENTITY_ID
+): Promise<PeriodExportData> {
+  const entity = getAccountingEntity(entityId);
   const { start, end } = bounds(year, month);
 
   const [factSnap, pagSnap] = await Promise.all([
-    db.collection(ACCOUNTING_COLLECTIONS.facturas).where("fecha", ">=", start).where("fecha", "<=", end).limit(4000).get(),
-    db.collection(ACCOUNTING_COLLECTIONS.pagos).where("fecha", ">=", start).where("fecha", "<=", end).limit(4000).get(),
+    db.collection(entity.collections.facturas).where("fecha", ">=", start).where("fecha", "<=", end).limit(4000).get(),
+    db.collection(entity.collections.pagos).where("fecha", ">=", start).where("fecha", "<=", end).limit(4000).get(),
   ]);
 
   const normalizedFacturas = facturasFirestoreToNormalized(
@@ -100,7 +109,7 @@ export async function loadPeriodExportData(year: number, month: number): Promise
 
   const periodoKey = `${year}-${String(month).padStart(2, "0")}`;
   const resumenIvahub = {
-    empresaNombre: ACCOUNTING_COMPANY_NAME,
+    empresaNombre: entity.displayName,
     periodo: periodoKey,
     facturasIncluidas: normalizedFacturas.length,
     pagosGastosEnPeriodo: pagSnap.docs.length,

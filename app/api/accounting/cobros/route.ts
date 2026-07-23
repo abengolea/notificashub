@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
-import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { cobroBodySchema } from "@/lib/accounting/schemas";
 import { toIso } from "@/lib/accounting/serialize";
@@ -23,8 +23,10 @@ export async function GET(req: NextRequest) {
   const denied = await requireDashboard(req);
   if (denied) return denied;
 
-  const col = db.collection(ACCOUNTING_COLLECTIONS.cobros);
-  const b = bounds(new URL(req.url).searchParams);
+  const searchParams = new URL(req.url).searchParams;
+  const entity = resolveAccountingEntity(searchParams);
+  const col = db.collection(entity.collections.cobros);
+  const b = bounds(searchParams);
 
   try {
     const snap =
@@ -71,6 +73,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    (body as { entity?: unknown }).entity
+  );
+
   const parsed = cobroBodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validación fallida", details: parsed.error.flatten() }, { status: 400 });
@@ -78,8 +85,8 @@ export async function POST(req: NextRequest) {
 
   const row = parsed.data;
   try {
-    const ref = await db.collection(ACCOUNTING_COLLECTIONS.cobros).add({
-      empresa: "notificas_srl",
+    const ref = await db.collection(entity.collections.cobros).add({
+      empresa: entity.empresa,
       fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.fecha)),
       importe: row.importe,
       concepto: row.concepto,

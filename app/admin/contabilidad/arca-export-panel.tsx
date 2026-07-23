@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type Dispatch, SetStateAction } from "react";
 import { ARCA_ARCHIVO_IDS, ARCA_FILE_NAMES, ARCA_IMPORT_GUIDE, type ArcaArchivoId } from "@/lib/arca-export/constants";
+import { REGIMEN_SIMPLIFICADO_CATEGORIAS } from "@/lib/sifere-cm05/regimen-simplificado";
 
 type VencRow = {
   periodo: { year: number; month: number; key: string };
@@ -38,10 +39,14 @@ function money(n: number): string {
 export function ArcaExportPanel(props: {
   month: string;
   year: string;
+  entityId: string;
+  isIndividual: boolean;
   authHeader: HeadersInit;
   exporting: boolean;
+  exportingCm05: boolean;
   onDownloadArchivo: (id: ArcaArchivoId) => void;
   onDownloadTodos: () => void;
+  onDownloadCm05: () => void;
   solicitarAlertasEscritorio: () => void;
   ultimoDigitoInput: string;
   setUltimoDigitoInput: Dispatch<SetStateAction<string>>;
@@ -59,14 +64,14 @@ export function ArcaExportPanel(props: {
     setLoadingVal(true);
     try {
       const res = await fetch(
-        `/api/accounting/arca-export/validate?year=${encodeURIComponent(p.year)}&month=${encodeURIComponent(p.month)}`,
+        `/api/accounting/arca-export/validate?year=${encodeURIComponent(p.year)}&month=${encodeURIComponent(p.month)}&entity=${encodeURIComponent(p.entityId)}`,
         { headers: p.authHeader }
       );
       if (res.ok) setValidation(await res.json());
     } finally {
       setLoadingVal(false);
     }
-  }, [p.authHeader, p.year, p.month]);
+  }, [p.authHeader, p.year, p.month, p.entityId]);
 
   useEffect(() => {
     void loadValidation();
@@ -75,10 +80,10 @@ export function ArcaExportPanel(props: {
   return (
     <div className="space-y-6">
       <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-1">Exportaciones ARCA</h2>
+        <h2 className="text-lg font-semibold mb-1">Exportar a ARCA</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-          ARCA importa por módulo separado. Descargá cada .txt ANSI por separado (sin ZIP) e importalo en la
-          pantalla correspondiente de ARCA.
+          Acá <strong>salís</strong> hacia ARCA (Libro IVA y CM05). Para <strong>traer</strong>{" "}
+          comprobantes desde Mis Comprobantes usá la pestaña <strong>Cargar datos</strong>.
         </p>
 
         {loadingVal ? (
@@ -164,6 +169,26 @@ export function ArcaExportPanel(props: {
               Avisos de escritorio
             </button>
           </div>
+
+          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20 p-4">
+            <h3 className="font-medium text-sm mb-1">Ingresos brutos · CM05</h3>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-3">
+              Planilla Excel del mes para SIFERE (convenio multilateral). Impulsa jurisdicción 902
+              (Buenos Aires) por defecto.
+            </p>
+            <button
+              type="button"
+              onClick={() => p.onDownloadCm05()}
+              disabled={p.exportingCm05}
+              className="rounded-lg bg-amber-700 text-white px-4 py-2 text-sm font-medium hover:bg-amber-800 disabled:opacity-50"
+            >
+              {p.exportingCm05
+                ? "Generando…"
+                : `Exportar CM05 ${p.month.padStart(2, "0")}/${p.year}`}
+            </button>
+          </div>
+
+          {p.isIndividual ? <RegimenSimplificadoCard /> : null}
         </div>
       </div>
 
@@ -206,6 +231,41 @@ function ArcaModuleCard(props: {
         ))}
       </div>
     </div>
+  );
+}
+
+function RegimenSimplificadoCard() {
+  return (
+    <details className="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-950/20 p-4">
+      <summary className="cursor-pointer font-medium text-sm text-indigo-900 dark:text-indigo-100">
+        Ingresos brutos · Régimen Simplificado (referencia)
+      </summary>
+      <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 mb-3">
+        Cuota fija mensual según facturación anual, para cuando pases de Convenio Multilateral a
+        Régimen Simplificado. Valores de referencia: verificá los montos oficiales vigentes antes de
+        pagar o cambiar de régimen — no se descargan de acá, es solo una tabla orientativa.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-indigo-200 dark:border-indigo-800">
+        <table className="w-full text-xs min-w-[360px]">
+          <thead>
+            <tr className="text-left border-b bg-indigo-100/60 dark:bg-indigo-900/30">
+              <th className="py-1.5 px-2">Categoría</th>
+              <th className="py-1.5 px-2 text-right">Facturación anual hasta</th>
+              <th className="py-1.5 px-2 text-right">Cuota mensual</th>
+            </tr>
+          </thead>
+          <tbody>
+            {REGIMEN_SIMPLIFICADO_CATEGORIAS.map((c) => (
+              <tr key={c.categoria} className="border-b border-indigo-100 dark:border-indigo-900/50">
+                <td className="py-1 px-2">{c.categoria}</td>
+                <td className="py-1 px-2 text-right">{money(c.facturacionAnualHasta)}</td>
+                <td className="py-1 px-2 text-right">{money(c.cuotaMensual)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 

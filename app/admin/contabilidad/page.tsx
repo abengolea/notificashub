@@ -13,9 +13,19 @@ import {
   type PagoFormState,
 } from "./pago-form";
 import { AuditoriaIvaTab } from "./auditoria-iva-tab";
+import { GananciasTab } from "./ganancias-tab";
+import { BienesPersonalesTab } from "./bienes-personales-tab";
 import { DASHBOARD_TOKEN_STORAGE_KEY } from "@/lib/dashboard-session";
 import { fechaFieldToUi } from "@/lib/accounting/serialize";
 import { ARCA_ARCHIVO_IDS, ARCA_FILE_NAMES, type ArcaArchivoId } from "@/lib/arca-export/constants";
+import {
+  ACCOUNTING_ENTITY_OPTIONS,
+  DEFAULT_ACCOUNTING_ENTITY_ID,
+  getAccountingEntity,
+  isAccountingEntityId,
+  type AccountingEntity,
+  type AccountingEntityId,
+} from "@/lib/accounting/entities";
 
 const MONTHS = [
   { v: "1", label: "Enero" },
@@ -33,6 +43,7 @@ const MONTHS = [
 ];
 
 const CONTAB_DIGITO_STORAGE = "notificashub-contab-ultimodigito";
+const CONTAB_ENTITY_STORAGE = "notificashub-contab-entity";
 
 type VencApiRow = {
   periodo: { year: number; month: number; key: string };
@@ -104,6 +115,7 @@ export default function ContabilidadPage() {
   const { year: yNow, month: mNow } = nowPeriod();
   const [year, setYear] = useState(yNow.toString());
   const [month, setMonth] = useState(mNow.toString());
+  const [entityId, setEntityId] = useState<AccountingEntityId>(DEFAULT_ACCOUNTING_ENTITY_ID);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +131,13 @@ export default function ContabilidadPage() {
   const [libroItems, setLibroItems] = useState<VencApiRow[]>([]);
   const [libroAviso, setLibroAviso] = useState("");
   const [exportingZip, setExportingZip] = useState(false);
+  const [exportingCm05, setExportingCm05] = useState(false);
+
+  const entity = useMemo(() => getAccountingEntity(entityId), [entityId]);
+
+  useEffect(() => {
+    if (tab === "bienes" && !entity.isIndividual) setTab("panel");
+  }, [entity.isIndividual, tab]);
 
   const authHeader = useMemo((): HeadersInit => {
     return token ? ({ Authorization: `Bearer ${token}` } as HeadersInit) : {};
@@ -126,9 +145,32 @@ export default function ContabilidadPage() {
 
   useEffect(() => {
     setToken(sessionStorage.getItem(DASHBOARD_TOKEN_STORAGE_KEY));
+    try {
+      const stored = sessionStorage.getItem(CONTAB_ENTITY_STORAGE);
+      if (isAccountingEntityId(stored)) setEntityId(stored);
+    } catch {
+      //
+    }
   }, []);
 
-  const qh = useCallback(() => `year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}`, [year, month]);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CONTAB_ENTITY_STORAGE, entityId);
+    } catch {
+      //
+    }
+  }, [entityId]);
+
+  const qh = useCallback(
+    () =>
+      `year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&entity=${encodeURIComponent(entityId)}`,
+    [year, month, entityId]
+  );
+
+  const entityQs = useCallback(
+    () => `entity=${encodeURIComponent(entityId)}`,
+    [entityId]
+  );
 
   const loadResumen = useCallback(async () => {
     if (!token) return;
@@ -278,7 +320,7 @@ export default function ContabilidadPage() {
       const yNum = parseInt(year, 10);
       const mNum = parseInt(month, 10);
       const res = await fetch(
-        `/api/accounting/export-libro-iva?year=${encodeURIComponent(String(yNum))}&month=${encodeURIComponent(String(mNum))}&archivo=${archivo}`,
+        `/api/accounting/export-libro-iva?year=${encodeURIComponent(String(yNum))}&month=${encodeURIComponent(String(mNum))}&archivo=${archivo}&entity=${encodeURIComponent(entityId)}`,
         { headers: authHeader }
       );
       if (res.status === 401) {
@@ -317,7 +359,7 @@ export default function ContabilidadPage() {
       URL.revokeObjectURL(url);
       return true;
     },
-    [token, year, month, authHeader]
+    [token, year, month, entityId, authHeader]
   );
 
   const descargaArcaArchivoWrapped = useCallback(
@@ -345,6 +387,45 @@ export default function ContabilidadPage() {
     }
   }, [descargaArcaArchivo]);
 
+  const descargaCm05 = useCallback(async () => {
+    const yNum = parseInt(year, 10);
+    const mNum = parseInt(month, 10);
+    if (!Number.isFinite(yNum) || !Number.isFinite(mNum)) {
+      setError("Mes/año inválidos");
+      return;
+    }
+    setExportingCm05(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/accounting/export-cm05?year=${encodeURIComponent(String(yNum))}&month=${encodeURIComponent(String(mNum))}&entity=${encodeURIComponent(entityId)}`,
+        { headers: authHeader }
+      );
+      if (!res.ok) {
+        let msg = "No se pudo exportar CM05";
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* ignore */
+        }
+        setError(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(cd);
+      const name = match?.[1] ?? `CM05_ingresos_gastos_${yNum}-${String(mNum).padStart(2, "0")}.xls`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      setExportingCm05(false);
+    }
+  }, [year, month, entityId, authHeader]);
+
   const refreshAll = async () => {
     await Promise.all([loadResumen(), loadLists()]);
   };
@@ -360,13 +441,17 @@ export default function ContabilidadPage() {
 
   useEffect(() => {
     setError(null);
+    setResumen(null);
+    setFacturas([]);
+    setCobros([]);
+    setPagos([]);
     if (!token) return;
     (async () => {
       setLoading(true);
       await Promise.all([loadResumen(), loadLists()]);
       setLoading(false);
     })();
-  }, [token, year, month, loadResumen, loadLists]);
+  }, [token, year, month, entityId, loadResumen, loadLists]);
 
   if (!token) {
     return (
@@ -392,7 +477,9 @@ export default function ContabilidadPage() {
         <header className="flex flex-wrap gap-4 items-start justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Contabilidad</h1>
-            <p className="text-sm text-zinc-500 mt-1">Notificas SRL · movimientos, facturas e IVA orientativo</p>
+            <p className="text-sm text-zinc-500 mt-1">
+              {entity.displayName} · elegí el mes, cargá comprobantes y después exportá a ARCA
+            </p>
           </div>
           <div className="flex flex-wrap gap-3 items-center text-sm">
             <Link
@@ -409,13 +496,28 @@ export default function ContabilidadPage() {
 
         <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-6 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-700/80 space-y-3">
           <div className="flex flex-wrap gap-3 items-end justify-between">
+            <div className="flex flex-wrap gap-3 items-end">
             <label className="flex flex-col gap-0.5 text-xs">
-              <span className="font-medium text-zinc-500 uppercase tracking-wide">Período</span>
+              <span className="font-medium text-zinc-500 uppercase tracking-wide">Contabilidad de</span>
+              <select
+                value={entityId}
+                onChange={(e) => setEntityId(e.target.value as AccountingEntityId)}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm min-w-[12rem] font-medium"
+              >
+                {ACCOUNTING_ENTITY_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="font-medium text-zinc-500 uppercase tracking-wide">Mes a trabajar</span>
               <div className="flex gap-2">
                 <select
                   value={month}
                   onChange={(e) => setMonth(e.target.value)}
-                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm min-w-[9rem]"
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm min-w-[9rem] font-medium"
                 >
                   {MONTHS.map((m) => (
                     <option key={m.v} value={m.v}>
@@ -429,14 +531,17 @@ export default function ContabilidadPage() {
                   max={2099}
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm w-24"
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm w-24 font-medium"
                 />
               </div>
             </label>
+            </div>
             {loading ? (
               <span className="text-xs text-zinc-500 pb-2">Actualizando…</span>
             ) : (
-              <span className="text-xs text-zinc-500 pb-2 hidden sm:inline">{periodLabel(month, year)}</span>
+              <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 pb-1.5">
+                {periodLabel(month, year)}
+              </span>
             )}
             {error ? <p className="text-xs text-red-600 dark:text-red-400 max-w-md pb-2">{error}</p> : null}
           </div>
@@ -447,36 +552,81 @@ export default function ContabilidadPage() {
               setTab(t);
             }}
             counts={tabCounts}
+            isIndividual={entity.isIndividual}
           />
         </div>
 
         {tab === "panel" && (
           <div className="space-y-6">
             {resumen ? (
-              <ResumenBlock data={resumen} moneyFn={money} periodLabel={periodLabel(month, year)} />
+              <ResumenBlock
+                data={resumen}
+                moneyFn={money}
+                periodLabel={periodLabel(month, year)}
+                onGoTab={setTab}
+              />
             ) : loading ? (
               <p className="text-sm text-zinc-500">Cargando resumen…</p>
             ) : null}
           </div>
         )}
         {tab === "cobros" && (
-          <CobrosTab authHeader={authHeader} cobros={cobros} facturas={facturas} onRefresh={loadLists} qh={qh} />
+          <CobrosTab
+            authHeader={authHeader}
+            cobros={cobros}
+            facturas={facturas}
+            onRefresh={loadLists}
+            qh={qh}
+            entityId={entityId}
+            entityQs={entityQs}
+          />
         )}
-        {tab === "pagos" && <PagosTab authHeader={authHeader} pagos={pagos} onRefresh={loadLists} qh={qh} />}
+        {tab === "pagos" && (
+          <PagosTab
+            authHeader={authHeader}
+            pagos={pagos}
+            onRefresh={loadLists}
+            qh={qh}
+            entityId={entityId}
+            entityQs={entityQs}
+            companyLabel={entity.displayName}
+            companyCuit={entity.cuit}
+          />
+        )}
         {tab === "facturas" && (
-          <FacturasTab authHeader={authHeader} facturas={facturas} onRefresh={loadLists} qh={qh} />
+          <FacturasTab
+            authHeader={authHeader}
+            facturas={facturas}
+            onRefresh={loadLists}
+            qh={qh}
+            entityId={entityId}
+            entityQs={entityQs}
+          />
         )}
         {tab === "importar" && (
-          <ImportarTab authHeader={authHeader} onDone={refreshAll} onGoTab={setTab} />
+          <ImportarTab
+            authHeader={authHeader}
+            onDone={refreshAll}
+            onGoTab={setTab}
+            year={year}
+            month={month}
+            entityId={entityId}
+            entityQs={entityQs}
+            integrations={entity.integrations}
+          />
         )}
         {tab === "arca" && (
           <ArcaTab
             month={month}
             year={year}
+            entityId={entityId}
+            isIndividual={entity.isIndividual}
             authHeader={authHeader}
             exporting={exportingZip}
+            exportingCm05={exportingCm05}
             onDownloadArchivo={(id) => void descargaArcaArchivoWrapped(id)}
             onDownloadTodos={() => void descargaArcaTodos()}
+            onDownloadCm05={() => void descargaCm05()}
             solicitarAlertasEscritorio={solicitarAlertasEscritorio}
             ultimoDigitoInput={ultimoDigitoInput}
             setUltimoDigitoInput={setUltimoDigitoInput}
@@ -488,7 +638,31 @@ export default function ContabilidadPage() {
           />
         )}
         {tab === "auditoria" && (
-          <AuditoriaIvaTab authHeader={authHeader} year={year} month={month} qh={qh} />
+          <AuditoriaIvaTab
+            authHeader={authHeader}
+            year={year}
+            month={month}
+            qh={qh}
+            entityId={entityId}
+          />
+        )}
+        {tab === "ganancias" && (
+          <GananciasTab
+            authHeader={authHeader}
+            year={year}
+            month={month}
+            entityId={entityId}
+            entityQs={entityQs}
+            isIndividual={entity.isIndividual}
+          />
+        )}
+        {tab === "bienes" && entity.isIndividual && (
+          <BienesPersonalesTab
+            authHeader={authHeader}
+            year={year}
+            entityId={entityId}
+            entityQs={entityQs}
+          />
         )}
       </div>
     </div>
@@ -498,18 +672,26 @@ export default function ContabilidadPage() {
 function MercadoPagoImportCard(props: {
   authHeader: HeadersInit;
   onDone: () => Promise<void>;
+  year: string;
+  month: string;
+  entityId: AccountingEntityId;
+  step: number;
 }) {
-  const { authHeader, onDone } = props;
+  const { authHeader, onDone, year, month, entityId, step } = props;
   const [mpSyncing, setMpSyncing] = useState(false);
-  const [mpRange, setMpRange] = useState({ begin: "", end: "" });
+  const [mpRange, setMpRange] = useState(() => monthDateRange(year, month));
+
+  useEffect(() => {
+    setMpRange(monthDateRange(year, month));
+  }, [year, month]);
 
   const syncMercadoPago = async () => {
     setMpSyncing(true);
     try {
       const body =
         mpRange.begin.trim() && mpRange.end.trim()
-          ? { begin: mpRange.begin.trim(), end: mpRange.end.trim() }
-          : {};
+          ? { begin: mpRange.begin.trim(), end: mpRange.end.trim(), entity: entityId }
+          : { entity: entityId };
       const res = await fetch("/api/accounting/mercadopago/sync-cobros", {
         method: "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
@@ -531,9 +713,13 @@ function MercadoPagoImportCard(props: {
 
   return (
     <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-6 shadow-sm">
-      <h3 className="font-semibold text-sky-900 dark:text-sky-100 mb-1">Mercado Pago</h3>
+      <span className="inline-flex items-center gap-1.5 mb-1">
+        <span className="w-5 h-5 rounded-full bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{step}</span>
+        <p className="text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Mercado Pago · Cobros online</p>
+      </span>
+      <h3 className="font-semibold text-sky-900 dark:text-sky-100 mb-1 mt-1">Sincronizar cobros</h3>
       <p className="text-sm text-sky-800 dark:text-sky-200 mb-4">
-        Importa cobros aprobados. Sin duplicar por id de pago.
+        Se conecta directo a MP y trae los cobros aprobados del mes. No hay nada que bajar. Ajustá las fechas si necesitás un rango distinto.
       </p>
       <div className="flex flex-wrap gap-4 items-end">
         <label className="flex flex-col gap-1 text-sm">
@@ -556,7 +742,7 @@ function MercadoPagoImportCard(props: {
         </label>
         <button
           type="button"
-          disabled={mpSyncing || Boolean(mpRange.begin) !== Boolean(mpRange.end)}
+          disabled={mpSyncing || !mpRange.begin || !mpRange.end}
           onClick={() => void syncMercadoPago()}
           className="rounded-lg bg-sky-600 text-white px-5 py-2 font-medium hover:bg-sky-700 disabled:opacity-50"
         >
@@ -567,38 +753,464 @@ function MercadoPagoImportCard(props: {
   );
 }
 
+function monthDateRange(year: string, month: string): { begin: string; end: string } {
+  const y = parseInt(year, 10);
+  const m = parseInt(month, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) {
+    return { begin: "", end: "" };
+  }
+  const begin = `${y}-${String(m).padStart(2, "0")}-01`;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { begin, end };
+}
+
 function ImportarTab(props: {
   authHeader: HeadersInit;
   onDone: () => Promise<void>;
   onGoTab: (t: TabId) => void;
+  year: string;
+  month: string;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
+  integrations: AccountingEntity["integrations"];
 }) {
-  const { authHeader, onDone, onGoTab } = props;
+  const { authHeader, onDone, onGoTab, year, month, entityId, entityQs, integrations } = props;
+  const monthName = MONTHS.find((m) => m.v === month)?.label ?? month;
+  const period = `${month.padStart(2, "0")}/${year}`;
+
+  let stepNum = 0;
+  const nextStep = () => {
+    stepNum += 1;
+    return stepNum;
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <TabPageIntro
-        title="Importar movimientos"
-        description="Extracto bancario o Mercado Pago. Los PDF de facturas y gastos están en sus pestañas."
+        title={`Cierre de ${monthName} ${year}`}
+        description="Seguí los pasos en orden. Cada uno trae datos de un portal distinto. Al final todo queda cargado para generar las declaraciones."
       />
-      <BankExtractCard authHeader={authHeader} onDone={onDone} />
-      <MercadoPagoImportCard authHeader={authHeader} onDone={onDone} />
-      <div className="grid sm:grid-cols-2 gap-4">
-        <button
-          type="button"
-          onClick={() => onGoTab("facturas")}
-          className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-4 text-left hover:border-violet-500/50"
-        >
-          <p className="font-medium text-sm">PDF de facturas</p>
-          <p className="text-xs text-zinc-500 mt-1">Pestaña Facturas</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => onGoTab("pagos")}
-          className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-4 text-left hover:border-violet-500/50"
-        >
-          <p className="font-medium text-sm">PDF de gastos</p>
-          <p className="text-xs text-zinc-500 mt-1">Pestaña Pagos</p>
-        </button>
+
+      {/* Guía rápida visual */}
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 p-4">
+        <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 mb-3">
+          ¿Qué hay que hacer este mes?
+        </p>
+        <ol className="space-y-2 text-sm">
+          {integrations.afipSyncVentas ? (
+            <li className="flex gap-2">
+              <span className="shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">1</span>
+              <span><strong>Ventas:</strong> clic en "Sync ventas electrónicas" acá abajo — se conecta solo a AFIP.</span>
+            </li>
+          ) : (
+            <li className="flex gap-2">
+              <span className="shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">1</span>
+              <span>
+                <strong>Ventas:</strong>{" "}
+                <a href="https://auth.afip.gob.ar" target="_blank" rel="noreferrer" className="underline text-blue-600 dark:text-blue-400">auth.afip.gob.ar</a>
+                {" "}→ Mis Comprobantes → <em>Emitidos</em> → filtrá {monthName} → Exportar Excel → subilo acá abajo.
+              </span>
+            </li>
+          )}
+          <li className="flex gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center">2</span>
+            <span>
+              <strong>Gastos:</strong>{" "}
+              <a href="https://auth.afip.gob.ar" target="_blank" rel="noreferrer" className="underline text-amber-600 dark:text-amber-400">auth.afip.gob.ar</a>
+              {" "}→ Mis Comprobantes → <em>Recibidos</em> → filtrá {monthName} → Exportar Excel → subilo acá abajo.
+            </span>
+          </li>
+          {integrations.bankIngest ? (
+            <li className="flex gap-2">
+              <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">3</span>
+              <span>
+                <strong>Banco:</strong>{" "}
+                <a href="https://www.macro.com.ar" target="_blank" rel="noreferrer" className="underline text-indigo-600 dark:text-indigo-400">macro.com.ar</a>
+                {" "}→ Banca Empresas → Cuenta corriente → Movimientos → filtrá {monthName} → descargar PDF del extracto → subilo acá abajo.
+              </span>
+            </li>
+          ) : null}
+          {integrations.mercadoPago ? (
+            <li className="flex gap-2">
+              <span className="shrink-0 w-5 h-5 rounded-full bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center">{integrations.bankIngest ? "4" : "3"}</span>
+              <span><strong>Mercado Pago:</strong> clic en "Sincronizar cobros" acá abajo — se conecta solo.</span>
+            </li>
+          ) : null}
+          <li className="flex gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+            <span><strong>Listo.</strong> Revisá en "Resumen" que los números cierren y después andá a "Declarar" para exportar a ARCA.</span>
+          </li>
+        </ol>
       </div>
+
+      <ol className="grid gap-4">
+        <li>
+          <ArcaSyncCard
+            authHeader={authHeader}
+            onDone={onDone}
+            year={year}
+            month={month}
+            entityId={entityId}
+            entityQs={entityQs}
+            afipSyncVentas={integrations.afipSyncVentas}
+            stepVentas={nextStep()}
+            stepGastos={nextStep()}
+          />
+        </li>
+        {integrations.bankIngest ? (
+          <li>
+            <BankExtractCard
+              authHeader={authHeader}
+              onDone={onDone}
+              entityId={entityId}
+              entityQs={entityQs}
+              step={nextStep()}
+            />
+          </li>
+        ) : null}
+        {integrations.mercadoPago ? (
+          <li>
+            <MercadoPagoImportCard
+              authHeader={authHeader}
+              onDone={onDone}
+              year={year}
+              month={month}
+              entityId={entityId}
+              step={nextStep()}
+            />
+          </li>
+        ) : null}
+        <li className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-600 p-4">
+          <p className="text-sm font-medium mb-1">¿Falta algún comprobante suelto?</p>
+          <p className="text-xs text-zinc-500 mb-3">
+            Si hay una factura o gasto que no aparece en Mis Comprobantes (ej: ticket en papel, servicio sin CAE), cargalo con IA desde PDF o a mano.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onGoTab("facturas")}
+              className="rounded-lg border px-3 py-2 text-sm hover:border-emerald-500/50"
+            >
+              Ir a Facturas
+            </button>
+            <button
+              type="button"
+              onClick={() => onGoTab("pagos")}
+              className="rounded-lg border px-3 py-2 text-sm hover:border-emerald-500/50"
+            >
+              Ir a Gastos
+            </button>
+          </div>
+        </li>
+      </ol>
+    </div>
+  );
+}
+
+function ArcaSyncCard(props: {
+  authHeader: HeadersInit;
+  onDone: () => Promise<void>;
+  year: string;
+  month: string;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
+  afipSyncVentas: boolean;
+  stepVentas: number;
+  stepGastos: number;
+}) {
+  const { authHeader, onDone, year, month, entityId, entityQs, afipSyncVentas, stepVentas, stepGastos } = props;
+  const period = `${month.padStart(2, "0")}/${year}`;
+  const [syncing, setSyncing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [preview, setPreview] = useState<
+    | {
+        kind: string;
+        total: number;
+        warnings: string[];
+        rows: {
+          kind: string;
+          fecha: string;
+          tipo: number;
+          pv: string;
+          numero: string;
+          contraparte: string;
+          total: number;
+        }[];
+        file: File;
+      }
+    | null
+  >(null);
+
+  const syncVentas = async () => {
+    setSyncing(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/accounting/afip/sync-ventas", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ year: Number(year), month: Number(month), entity: entityId }),
+      });
+      const j = (await res.json()) as {
+        error?: string;
+        imported?: number;
+        consulted?: number;
+        skippedDuplicates?: number;
+        skippedNoFecha?: number;
+        skippedConsultError?: number;
+        errors?: string[];
+        diagnostics?: string[];
+        ptoVtas?: number[];
+      };
+      if (!res.ok) {
+        setMsg(j.error ?? j.errors?.[0] ?? "No se pudo sincronizar ventas AFIP");
+        return;
+      }
+      const parts = [
+        `${j.imported ?? 0} ventas nuevas`,
+        `${j.skippedDuplicates ?? 0} ya estaban`,
+        `${j.consulted ?? 0} consultas`,
+      ];
+      if (j.ptoVtas?.length) parts.push(`PV ${j.ptoVtas.join(",")}`);
+      let text = parts.join(" · ");
+      if (j.diagnostics?.length) text += `\n${j.diagnostics.slice(0, 4).join(" · ")}`;
+      if (j.errors?.length) text += `\n${j.errors.slice(0, 2).join(" · ")}`;
+      setMsg(text);
+      await onDone();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const onFile = async (file: File | null) => {
+    if (!file) return;
+    setImporting(true);
+    setMsg("");
+    setPreview(null);
+    try {
+      const fd = new FormData();
+      fd.set("file", file);
+      fd.set("dryRun", "1");
+      fd.append("entity", entityId);
+      const res = await fetch(`/api/accounting/mis-comprobantes/import?${entityQs()}`, {
+        method: "POST",
+        headers: authHeader,
+        body: fd,
+      });
+      const j = (await res.json()) as {
+        error?: string;
+        kind?: string;
+        total?: number;
+        warnings?: string[];
+        preview?: {
+          kind: string;
+          fecha: string;
+          tipo: number;
+          pv: string;
+          numero: string;
+          contraparte: string;
+          total: number;
+        }[];
+      };
+      if (!res.ok) {
+        setMsg(j.error ?? "No se pudo leer el archivo");
+        return;
+      }
+      setPreview({
+        kind: j.kind ?? "recibido",
+        total: j.total ?? 0,
+        warnings: j.warnings ?? [],
+        rows: j.preview ?? [],
+        file,
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!preview) return;
+    setImporting(true);
+    setMsg("");
+    try {
+      const fd = new FormData();
+      fd.set("file", preview.file);
+      fd.append("entity", entityId);
+      const res = await fetch(`/api/accounting/mis-comprobantes/import?${entityQs()}`, {
+        method: "POST",
+        headers: authHeader,
+        body: fd,
+      });
+      const j = (await res.json()) as {
+        error?: string;
+        importedPagos?: number;
+        importedFacturas?: number;
+        skippedDuplicates?: number;
+      };
+      if (!res.ok) {
+        setMsg(j.error ?? "Error al importar");
+        return;
+      }
+      setMsg(
+        `Listo: ${j.importedFacturas ?? 0} ventas · ${j.importedPagos ?? 0} gastos · ${j.skippedDuplicates ?? 0} duplicados omitidos.`
+      );
+      setPreview(null);
+      await onDone();
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const fileLabel = importing ? "Leyendo archivo…" : "Elegir archivo CSV / XLS";
+
+  return (
+    <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-5 shadow-sm space-y-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+          Comprobantes ARCA · {period}
+        </p>
+        <h3 className="font-semibold text-base mt-1">Ventas y gastos del mes</h3>
+        <p className="text-sm text-zinc-500 mt-1">
+          Entrá a{" "}
+          <a href="https://auth.afip.gob.ar" target="_blank" rel="noreferrer" className="underline text-emerald-700 dark:text-emerald-400">
+            auth.afip.gob.ar
+          </a>{" "}
+          → <strong>Mis Comprobantes</strong> → filtrá el mes → Exportar Excel. Hacelo por separado
+          para Emitidos y Recibidos, y subí los dos archivos acá abajo.
+        </p>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 p-4 space-y-3">
+          <div>
+            <span className="inline-flex items-center gap-1.5 mb-1">
+              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{stepVentas}</span>
+              <p className="font-medium text-sm text-blue-900 dark:text-blue-100">Ventas (emitidos)</p>
+            </span>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              {afipSyncVentas
+                ? "Podés sincronizar directo con AFIP (recomendado) o subir el Excel de Emitidos."
+                : "ARCA → Mis Comprobantes → pestaña Emitidos → Exportar Excel → subilo acá."}
+            </p>
+          </div>
+          {afipSyncVentas ? (
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={() => void syncVentas()}
+              className="w-full rounded-lg bg-blue-700 text-white px-3 py-2 text-sm font-medium hover:bg-blue-800 disabled:opacity-50"
+            >
+              {syncing ? "Consultando AFIP…" : "Sync ventas electrónicas"}
+            </button>
+          ) : null}
+          <label className="block w-full text-center rounded-lg border border-blue-300 dark:border-blue-700 bg-white/80 dark:bg-zinc-900/40 px-3 py-2 text-sm cursor-pointer hover:bg-white dark:hover:bg-zinc-800">
+            {fileLabel}
+            <input
+              type="file"
+              accept=".csv,.xls,.xlsx,.txt"
+              className="hidden"
+              disabled={importing}
+              onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <p className="text-[11px] text-zinc-500">Nombre típico: <em>Mis Comprobantes Emitidos - CUIT….xlsx</em></p>
+        </div>
+
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20 p-4 space-y-3">
+          <div>
+            <span className="inline-flex items-center gap-1.5 mb-1">
+              <span className="w-5 h-5 rounded-full bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{stepGastos}</span>
+              <p className="font-medium text-sm text-amber-900 dark:text-amber-100">Gastos (recibidos)</p>
+            </span>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              ARCA → Mis Comprobantes → pestaña <strong>Recibidos</strong> → filtrá el mes → Exportar Excel → subilo acá.
+            </p>
+          </div>
+          <label className="block w-full text-center rounded-lg bg-amber-700 text-white px-3 py-2 text-sm font-medium cursor-pointer hover:bg-amber-800">
+            {importing ? "Leyendo archivo…" : "Subir recibidos"}
+            <input
+              type="file"
+              accept=".csv,.xls,.xlsx,.txt"
+              className="hidden"
+              disabled={importing}
+              onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <p className="text-[11px] text-zinc-500">Nombre típico: <em>Mis Comprobantes Recibidos - CUIT….xlsx</em></p>
+        </div>
+      </div>
+
+      {msg ? (
+        <p className="text-sm rounded-lg bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 p-3 whitespace-pre-line">
+          {msg}
+        </p>
+      ) : null}
+
+      {preview ? (
+        <div className="space-y-3 border-t border-zinc-200 dark:border-zinc-600 pt-4">
+          <p className="text-sm font-medium">
+            Revisá antes de confirmar ·{" "}
+            <span className="text-emerald-700 dark:text-emerald-400">
+              {preview.kind === "emitido" ? "ventas" : "gastos"}
+            </span>{" "}
+            · {preview.total} comprobantes
+          </p>
+          {preview.warnings.length > 0 ? (
+            <ul className="text-xs text-amber-700 list-disc pl-4">
+              {preview.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="max-h-48 overflow-auto text-xs">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-zinc-500">
+                  <th className="py-1 pr-2">Fecha</th>
+                  <th className="py-1 pr-2">Tipo</th>
+                  <th className="py-1 pr-2">PV-N°</th>
+                  <th className="py-1 pr-2">Contraparte</th>
+                  <th className="py-1 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((r, i) => (
+                  <tr key={i} className="border-t border-zinc-100 dark:border-zinc-700">
+                    <td className="py-1 pr-2">{r.fecha}</td>
+                    <td className="py-1 pr-2">{r.tipo}</td>
+                    <td className="py-1 pr-2">
+                      {r.pv}-{r.numero}
+                    </td>
+                    <td className="py-1 pr-2 truncate max-w-[12rem]">{r.contraparte}</td>
+                    <td className="py-1 text-right">
+                      {r.total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={importing}
+              onClick={() => void confirmImport()}
+              className="rounded-lg bg-emerald-700 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {importing ? "Importando…" : "Confirmar e importar"}
+            </button>
+            <button
+              type="button"
+              disabled={importing}
+              onClick={() => setPreview(null)}
+              className="rounded-lg border px-4 py-2 text-sm"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -607,10 +1219,12 @@ function ResumenBlock({
   data,
   moneyFn,
   periodLabel: periodTitle,
+  onGoTab,
 }: {
   data: Record<string, unknown>;
   moneyFn: (n: number) => string;
   periodLabel: string;
+  onGoTab: (t: TabId) => void;
 }) {
   const iva = data.iva as Record<string, unknown> | undefined;
   const deb = (iva?.debitoVentas as Record<string, number>) ?? {};
@@ -623,15 +1237,51 @@ function ResumenBlock({
     <div className="space-y-6">
       <TabPageIntro
         title={periodTitle}
-        description="Resumen orientativo del mes: IVA según facturas y caja según cobros/pagos registrados."
+        description="Vista rápida del mes. Cargá datos primero; al final exportá en Declarar."
       />
+
+      <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-4">
+        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100 mb-3">
+          Orden sugerido del mes
+        </p>
+        <div className="grid sm:grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => onGoTab("importar")}
+            className="rounded-lg bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-800 px-3 py-3 text-left hover:border-emerald-500"
+          >
+            <span className="text-[10px] font-bold text-emerald-700">1</span>
+            <p className="text-sm font-medium">Cargar datos</p>
+            <p className="text-xs text-zinc-500">ARCA, banco, MP</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => onGoTab("facturas")}
+            className="rounded-lg bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-800 px-3 py-3 text-left hover:border-emerald-500"
+          >
+            <span className="text-[10px] font-bold text-emerald-700">2</span>
+            <p className="text-sm font-medium">Revisar facturas</p>
+            <p className="text-xs text-zinc-500">Compras y ventas</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => onGoTab("arca")}
+            className="rounded-lg bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-800 px-3 py-3 text-left hover:border-emerald-500"
+          >
+            <span className="text-[10px] font-bold text-emerald-700">3</span>
+            <p className="text-sm font-medium">Declarar</p>
+            <p className="text-xs text-zinc-500">Exportar a ARCA</p>
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
           <p className="text-xs text-zinc-500 uppercase tracking-wide">IVA orientativo</p>
           <p className="text-lg font-bold mt-1 text-amber-700 dark:text-amber-400">{moneyFn(diffIva)}</p>
         </div>
         <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
-          <p className="text-xs text-zinc-500 uppercase tracking-wide">Caja (cobros − pagos)</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">Caja (cobros − gastos)</p>
           <p className="text-lg font-bold mt-1">{moneyFn(tesoreria?.resultadoCajaOrientativo ?? 0)}</p>
         </div>
         <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
@@ -639,7 +1289,7 @@ function ResumenBlock({
           <p className="text-lg font-bold mt-1">{Number(data.libroFacturasCargadas) || 0}</p>
         </div>
         <div className="rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 shadow-sm">
-          <p className="text-xs text-zinc-500 uppercase tracking-wide">Cobros / Pagos</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">Cobros / Gastos</p>
           <p className="text-sm font-bold mt-1">
             {Number(data.cobrosRegistrados) || 0} / {Number(data.pagosRegistrados) || 0}
           </p>
@@ -709,10 +1359,17 @@ type BankPreviewRow = {
   duplicate: boolean;
   existingKind?: string;
   selected: boolean;
+  vepHint?: { isVep: true; taxSubcategory: string; isIncomeTaxDeductible: boolean } | null;
 };
 
-function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise<void> }) {
-  const { authHeader, onDone } = props;
+function BankExtractCard(props: {
+  authHeader: HeadersInit;
+  onDone: () => Promise<void>;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
+  step: number;
+}) {
+  const { authHeader, onDone, entityId, entityQs, step } = props;
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -727,9 +1384,10 @@ function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise
     }
     const fd = new FormData();
     fd.append("pdf", file);
+    fd.append("entity", entityId);
     setBusy(true);
     try {
-      const res = await fetch("/api/accounting/bank-ingest", {
+      const res = await fetch(`/api/accounting/bank-ingest?${entityQs()}`, {
         method: "POST",
         headers: authHeader,
         body: fd,
@@ -773,6 +1431,7 @@ function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise
         method: "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
         body: JSON.stringify({
+          entity: entityId,
           pdfStoragePath: pdfStoragePath || undefined,
           movements: selected,
         }),
@@ -818,13 +1477,16 @@ function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise
         if (f) void processFile(f);
       }}
     >
+      <span className="inline-flex items-center gap-1.5 mb-1">
+        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{step}</span>
+        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Banco · Extracto del mes</p>
+      </span>
       <h3 className="font-medium text-zinc-800 dark:text-zinc-100 mb-1">
-        Extracto bancario (PDF + IA)
+        Movimientos bancarios (PDF)
       </h3>
       <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-        Subí el PDF de movimientos de la cuenta corriente. La IA detecta cobros y pagos; revisás la
-        tabla y confirmás. No duplica movimientos ya importados. Alimenta la caja del resumen junto
-        con facturas y Mercado Pago. El Libro IVA sigue saliendo de facturas.
+        <a href="https://www.macro.com.ar" target="_blank" rel="noreferrer" className="underline text-indigo-600 dark:text-indigo-400">macro.com.ar</a>
+        {" "}→ Banca Empresas → Cuenta corriente → Movimientos → filtrá el mes → descargar PDF del extracto → subilo acá. La IA lo lee y te muestra una tabla para revisar antes de confirmar.
       </p>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <input
@@ -887,12 +1549,22 @@ function BankExtractCard(props: { authHeader: HeadersInit; onDone: () => Promise
                       >
                         {row.kind}
                       </span>
+                      {row.vepHint ? (
+                        <span className="ml-1.5 inline-block rounded px-1 py-0.5 text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                          VEP
+                        </span>
+                      ) : null}
                       {row.duplicate ? (
                         <span className="ml-1 text-[10px] text-zinc-500">(ya cargado)</span>
                       ) : null}
                     </td>
-                    <td className="py-2 px-2 max-w-[240px] truncate" title={row.concepto}>
-                      {row.concepto}
+                    <td className="py-2 px-2 max-w-[240px]" title={row.concepto}>
+                      <span className="truncate block">{row.concepto}</span>
+                      {row.vepHint ? (
+                        <span className="text-[10px] text-violet-600 dark:text-violet-400">
+                          → {row.vepHint.taxSubcategory.replace(/_/g, " ")} · {row.vepHint.isIncomeTaxDeductible ? "deducible Ganancias" : "no deducible"}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 px-2 text-right font-medium">{money(row.importe)}</td>
                     <td className="py-2 px-2 font-mono text-xs">{row.referenciaBanco}</td>
@@ -934,8 +1606,10 @@ function AccountingPdfAiCard(props: {
   mode: "factura" | "pago";
   onDone: () => Promise<void>;
   onPagoExtracted?: (extracted: Record<string, unknown>, receiverCuit?: string | null) => void;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
 }) {
-  const { authHeader, mode, onDone, onPagoExtracted } = props;
+  const { authHeader, mode, onDone, onPagoExtracted, entityId, entityQs } = props;
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [tipoLibro, setTipoLibro] = useState<"venta" | "compra">("venta");
@@ -949,12 +1623,13 @@ function AccountingPdfAiCard(props: {
     const fd = new FormData();
     fd.append("pdf", file);
     fd.append("tipo", mode === "factura" ? "factura" : "pago");
+    fd.append("entity", entityId);
     if (mode === "factura") fd.append("tipoLibro", tipoLibro);
     if (mode === "pago") fd.append("autoSave", "false");
 
     setBusy(true);
     try {
-      const res = await fetch("/api/accounting/pdf-ingest", {
+      const res = await fetch(`/api/accounting/pdf-ingest?${entityQs()}`, {
         method: "POST",
         headers: authHeader,
         body: fd,
@@ -1043,8 +1718,10 @@ function FacturasTab(props: {
   facturas: Record<string, unknown>[];
   onRefresh: () => Promise<void>;
   qh: () => string;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
 }) {
-  const { authHeader, facturas, onRefresh, qh } = props;
+  const { authHeader, facturas, onRefresh, qh, entityId, entityQs } = props;
 
   type FormState = {
     tipo: string;
@@ -1103,6 +1780,7 @@ function FacturasTab(props: {
     }
 
     const body = {
+      entity: entityId,
       tipo: form.tipo,
       numero: form.numero.trim(),
       puntoVenta: form.puntoVenta.trim() || undefined,
@@ -1120,7 +1798,9 @@ function FacturasTab(props: {
     setSaving(true);
     try {
       const url =
-        editId !== null ? `/api/accounting/facturas/${editId}` : "/api/accounting/facturas";
+        editId !== null
+          ? `/api/accounting/facturas/${editId}?${entityQs()}`
+          : "/api/accounting/facturas";
       const method = editId !== null ? "PATCH" : "POST";
       const res = await fetch(url, {
         method,
@@ -1162,7 +1842,7 @@ function FacturasTab(props: {
 
   const del = async (id: string) => {
     if (!confirm("¿Eliminar esta factura?")) return;
-    await fetch(`/api/accounting/facturas/${id}`, { method: "DELETE", headers: authHeader });
+    await fetch(`/api/accounting/facturas/${id}?${entityQs()}`, { method: "DELETE", headers: authHeader });
     await onRefresh();
   };
 
@@ -1170,7 +1850,7 @@ function FacturasTab(props: {
     <div className="space-y-6">
       <TabPageIntro
         title="Facturas"
-        description="Compras y ventas del mes para el Libro IVA orientativo. Exportá desde la pestaña ARCA / IVA."
+        description="Libro de compras y ventas del mes. Preferí cargarlas desde Cargar datos (Mis Comprobantes). Exportá a ARCA desde Declarar."
       />
       <div className="rounded-xl bg-white dark:bg-zinc-800 border overflow-hidden shadow-sm">
         <table className="w-full text-sm min-w-[720px]">
@@ -1227,7 +1907,13 @@ function FacturasTab(props: {
       </div>
       <CollapsibleSection title="PDF + IA (factura o comprobante)" subtitle="Clasificá venta o compra" defaultOpen={false}>
         <div className="pt-4">
-          <AccountingPdfAiCard authHeader={authHeader} mode="factura" onDone={onRefresh} />
+          <AccountingPdfAiCard
+            authHeader={authHeader}
+            mode="factura"
+            onDone={onRefresh}
+            entityId={entityId}
+            entityQs={entityQs}
+          />
         </div>
       </CollapsibleSection>
       <CollapsibleSection
@@ -1387,8 +2073,10 @@ function CobrosTab(props: {
   facturas: Record<string, unknown>[];
   onRefresh: () => Promise<void>;
   qh: () => string;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
 }) {
-  const { authHeader, cobros, facturas, onRefresh, qh } = props;
+  const { authHeader, cobros, facturas, onRefresh, qh, entityId, entityQs } = props;
 
   const facturaLabelById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1429,6 +2117,7 @@ function CobrosTab(props: {
     setSaving(true);
     try {
       const body = {
+        entity: entityId,
         fecha: form.fecha,
         importe,
         concepto: form.concepto.trim(),
@@ -1436,7 +2125,9 @@ function CobrosTab(props: {
         facturaId: form.facturaId.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
       };
-      const url = editId ? `/api/accounting/cobros/${editId}` : "/api/accounting/cobros";
+      const url = editId
+        ? `/api/accounting/cobros/${editId}?${entityQs()}`
+        : "/api/accounting/cobros";
       const res = await fetch(url, {
         method: editId ? "PATCH" : "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
@@ -1541,7 +2232,7 @@ function CobrosTab(props: {
                         className="text-red-600 hover:underline"
                         onClick={async () => {
                           if (!confirm("¿Eliminar?")) return;
-                          await fetch(`/api/accounting/cobros/${cid}`, {
+                          await fetch(`/api/accounting/cobros/${cid}?${entityQs()}`, {
                             method: "DELETE",
                             headers: authHeader,
                           });
@@ -1651,8 +2342,12 @@ function PagosTab(props: {
   pagos: Record<string, unknown>[];
   onRefresh: () => Promise<void>;
   qh: () => string;
+  entityId: AccountingEntityId;
+  entityQs: () => string;
+  companyLabel: string;
+  companyCuit: string;
 }) {
-  const { authHeader, pagos, onRefresh, qh } = props;
+  const { authHeader, pagos, onRefresh, qh, entityId, entityQs, companyLabel, companyCuit } = props;
 
   const [form, setForm] = useState<PagoFormState>(emptyPagoForm);
   const [editId, setEditId] = useState<string | null>(null);
@@ -1670,8 +2365,10 @@ function PagosTab(props: {
     e.preventDefault();
     setSaving(true);
     try {
-      const body = buildPagoSubmitBody(form);
-      const url = editId ? `/api/accounting/pagos/${editId}` : "/api/accounting/pagos";
+      const body = { ...buildPagoSubmitBody(form), entity: entityId };
+      const url = editId
+        ? `/api/accounting/pagos/${editId}?${entityQs()}`
+        : "/api/accounting/pagos";
       const res = await fetch(url, {
         method: editId ? "PATCH" : "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
@@ -1708,8 +2405,8 @@ function PagosTab(props: {
   return (
     <div className="space-y-6">
       <TabPageIntro
-        title="Pagos / Gastos"
-        description="Egresos con clasificación impositiva y contable. Los gastos con Factura A e IVA computable entran al Libro IVA Compras al exportar."
+        title="Gastos"
+        description="Gastos del mes. Preferí importarlos desde Mis Comprobantes Recibidos (Cargar datos). Acá podés completar PDF o alta manual. Factura A con IVA entra al Libro IVA."
       />
       <CollapsibleSection title="PDF + IA (factura de gasto)" subtitle="Extrae datos fiscales — revisión manual" defaultOpen={false}>
         <div className="pt-4">
@@ -1718,6 +2415,8 @@ function PagosTab(props: {
             mode="pago"
             onDone={onRefresh}
             onPagoExtracted={handlePagoExtracted}
+            entityId={entityId}
+            entityQs={entityQs}
           />
         </div>
       </CollapsibleSection>
@@ -1738,6 +2437,8 @@ function PagosTab(props: {
             setFormOpen(false);
           }}
           receiverCuitDetected={receiverCuitDetected}
+          companyLabel={companyLabel}
+          companyCuit={companyCuit}
         />
       </CollapsibleSection>
 
@@ -1822,7 +2523,7 @@ function PagosTab(props: {
                         className="text-red-600 hover:underline"
                         onClick={async () => {
                           if (!confirm("¿Eliminar?")) return;
-                          await fetch(`/api/accounting/pagos/${pid}`, {
+                          await fetch(`/api/accounting/pagos/${pid}?${entityQs()}`, {
                             method: "DELETE",
                             headers: authHeader,
                           });

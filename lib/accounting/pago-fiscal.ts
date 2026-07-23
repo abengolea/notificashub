@@ -7,10 +7,43 @@ export const INVOICE_TYPES = [
   "factura_c",
   "ticket",
   "recibo",
+  "vep",
   "sin_comprobante",
   "otro",
 ] as const;
 export type InvoiceType = (typeof INVOICE_TYPES)[number];
+
+export const TAX_SUBCATEGORIES = [
+  "iva",
+  "iibb",
+  "ganancias",
+  "bienes_personales",
+  "autonomos",
+  "sellos",
+  "otro_tributo",
+] as const;
+export type TaxSubcategory = (typeof TAX_SUBCATEGORIES)[number];
+
+export const TAX_SUBCATEGORY_LABELS: Record<TaxSubcategory, string> = {
+  iva: "IVA",
+  iibb: "Ingresos Brutos",
+  ganancias: "Ganancias",
+  bienes_personales: "Bienes Personales",
+  autonomos: "Autónomos",
+  sellos: "Impuesto de sellos",
+  otro_tributo: "Otro tributo",
+};
+
+/** IIBB y Autónomos son deducibles en Ganancias; IVA, BP y Ganancias no lo son. */
+export const TAX_SUBCATEGORY_DEDUCTIBLE: Record<TaxSubcategory, boolean> = {
+  iva: false,
+  iibb: true,
+  ganancias: false,
+  bienes_personales: false,
+  autonomos: true,
+  sellos: true,
+  otro_tributo: false,
+};
 
 export const SUPPLIER_VAT_CONDITIONS = [
   "responsable_inscripto",

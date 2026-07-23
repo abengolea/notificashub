@@ -1,0 +1,10 @@
+---
+description: Rama por defecto y deploy a producción
+alwaysApply: true
+---
+
+# Git y deploy
+
+- Trabajá en **`main`** por defecto. Solo creá feature branches si el usuario lo pide explícitamente.
+- **No** exijas frase mágica ni autorización especial para deploy a producción: si el usuario pide subir/deploy a producción, procedé.
+- Seguí el resto de las reglas de git habituales (commits solo si lo piden, no force-push destructivo sin pedido explícito, etc.).

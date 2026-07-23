@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireDashboard } from "@/lib/require-dashboard";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import {
   getArcaArchivoDownload,
   isComprasArchivo,
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
+  const entity = resolveAccountingEntity(searchParams);
   const y = parseInt(searchParams.get("year") ?? "", 10);
   const m = parseInt(searchParams.get("month") ?? "", 10);
   const archivo = parseArcaArchivoId(searchParams.get("archivo"));
@@ -41,7 +43,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const data = await loadPeriodExportData(y, m);
+    const data = await loadPeriodExportData(y, m, entity.id);
     const validation = validateArcaExport(data);
 
     if (!skipValidation && isComprasArchivo(archivo) && validation.compras.comprobantes === 0) {

@@ -15,10 +15,13 @@ function bucketName(): string {
 export async function uploadAccountingPdf(params: {
   buffer: Buffer;
   originalName: string;
+  /** Prefijo Storage por entidad (default Notificas). */
+  storagePrefix?: string;
 }): Promise<{ storagePath: string }> {
   const safeName = params.originalName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
   const suffix = randomBytes(8).toString("hex");
-  const storagePath = `accounting-notificas-srl/pdf-inbox/${Date.now()}_${suffix}_${safeName || "documento.pdf"}`;
+  const prefix = (params.storagePrefix?.trim() || "accounting-notificas-srl").replace(/^\/+|\/+$/g, "");
+  const storagePath = `${prefix}/pdf-inbox/${Date.now()}_${suffix}_${safeName || "documento.pdf"}`;
 
   const bucket = getStorage(adminApp).bucket(bucketName());
   const file = bucket.file(storagePath);

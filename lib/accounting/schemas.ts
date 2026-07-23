@@ -4,6 +4,7 @@ import {
   SUPPLIER_VAT_CONDITIONS,
   PAID_BY_OPTIONS,
   ACCOUNTING_CATEGORIES,
+  TAX_SUBCATEGORIES,
   validateVatComputable,
 } from "@/lib/accounting/pago-fiscal";
 
@@ -21,6 +22,9 @@ export type PaidBy = z.infer<typeof paidBySchema>;
 
 export const accountingCategorySchema = z.enum(ACCOUNTING_CATEGORIES);
 export type AccountingCategory = z.infer<typeof accountingCategorySchema>;
+
+export const taxSubcategorySchema = z.enum(TAX_SUBCATEGORIES);
+export type TaxSubcategory = z.infer<typeof taxSubcategorySchema>;
 
 export const tipoFacturaSchema = z.enum(["venta", "compra"]);
 export const tipoComprobanteSchema = z.enum(["A", "B", "C", "credito_a", "credito_b", "credito_c", "otro"]);
@@ -85,6 +89,7 @@ export const pagoFiscalFieldsSchema = z.object({
   grossIncomePerceptionAmount: optionalAmount,
   otherTaxesAmount: optionalAmount,
   accountingCategory: accountingCategorySchema.nullable().optional(),
+  taxSubcategory: taxSubcategorySchema.nullable().optional(),
   paymentMethod: medioPagoSchema.optional(),
   paidBy: paidBySchema.nullable().optional(),
   isVatComputable: z.boolean().optional(),
@@ -171,3 +176,52 @@ export const pagoBodySchema = z
   });
 
 export type PagoBody = z.infer<typeof pagoBodySchema>;
+
+export const deduccionCategoriaSchema = z.enum([
+  "obra_social",
+  "honorarios_medicos",
+  "alquiler_vivienda",
+  "donaciones",
+  "seguro_vida",
+  "aportes_jubilatorios",
+  "otro",
+]);
+export type DeduccionCategoria = z.infer<typeof deduccionCategoriaSchema>;
+
+export const deduccionBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  categoria: deduccionCategoriaSchema,
+  descripcion: z.string().min(1).max(512),
+  importe: z.number().finite().min(0),
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  notes: z.string().max(2000).optional(),
+});
+export type DeduccionBody = z.infer<typeof deduccionBodySchema>;
+
+export const bienNaturalezaSchema = z.enum(["activo", "pasivo"]);
+export type BienNaturaleza = z.infer<typeof bienNaturalezaSchema>;
+
+export const bienTipoSchema = z.enum([
+  "inmueble",
+  "rodado",
+  "cuenta_bancaria",
+  "inversion",
+  "participacion_societaria",
+  "cripto",
+  "otro",
+]);
+export type BienTipo = z.infer<typeof bienTipoSchema>;
+
+export const bienBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  naturaleza: bienNaturalezaSchema,
+  tipo: bienTipoSchema,
+  descripcion: z.string().min(1).max(512),
+  valuacionFiscal: z.number().finite().min(0),
+  notes: z.string().max(2000).optional(),
+  pdfStoragePath: z.string().max(512).optional(),
+});
+export type BienBody = z.infer<typeof bienBodySchema>;

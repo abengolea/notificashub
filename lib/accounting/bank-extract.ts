@@ -1,5 +1,6 @@
 import { medioPagoSchema } from "@/lib/accounting/schemas";
-import type { MedioPago } from "@/lib/accounting/schemas";
+import type { MedioPago, TaxSubcategory } from "@/lib/accounting/schemas";
+import { TAX_SUBCATEGORY_DEDUCTIBLE } from "@/lib/accounting/pago-fiscal";
 
 export type BankMovementKind = "cobro" | "pago" | "ignorar";
 
@@ -12,6 +13,12 @@ export type RawBankMovement = {
   clasificacion?: string;
 };
 
+export type VepHint = {
+  isVep: true;
+  taxSubcategory: TaxSubcategory;
+  isIncomeTaxDeductible: boolean;
+};
+
 export type NormalizedBankMovement = {
   fecha: string;
   importe: number;
@@ -21,10 +28,34 @@ export type NormalizedBankMovement = {
   bankReference: string;
   referenciaBanco: string;
   observaciones?: string;
+  vepHint?: VepHint;
 };
 
 const PAGO_KEYWORDS = /\b(DBCR|DEBITO|DÉBITO|COMISION|COMISIÓN|TASA\s+GRAL|IMPUESTO|IVA\s+DB|GASTO|COM\.|MANTENIMIENTO)\b/i;
 const COBRO_KEYWORDS = /\b(CCERR|CREDITO|CRÉDITO|TRANSF|TRANSFERENCIA|DEPOSITO|DEPÓSITO|COBRO|INGRESO|ABONO)\b/i;
+
+const VEP_PATTERNS: { pattern: RegExp; taxSubcategory: TaxSubcategory }[] = [
+  { pattern: /\bVEP\b.*\bIVA\b|\bIVA\b.*\bVEP\b|PAGO\s+IVA/i, taxSubcategory: "iva" },
+  { pattern: /\bVEP\b.*\bIIBB\b|\bIIBB\b.*\bVEP\b|INGRESOS\s+BRUTOS|ING\.?\s*BRUT/i, taxSubcategory: "iibb" },
+  { pattern: /\bVEP\b.*\bGANANCI|\bGANANCI.*\bVEP\b|IMPUESTO\s+GANANCIAS/i, taxSubcategory: "ganancias" },
+  { pattern: /BIENES\s+PERSONALES|BIEN\.?\s*PERS/i, taxSubcategory: "bienes_personales" },
+  { pattern: /\bAUTONOMO|\bAUTÓNOMO/i, taxSubcategory: "autonomos" },
+  { pattern: /SELLO|IMPUESTO\s+SELLO/i, taxSubcategory: "sellos" },
+  { pattern: /\bVEP\b|\bAFIP\b|\bARCA\b|\bARBA\b|\bDGR\b|\bAGIP\b/i, taxSubcategory: "otro_tributo" },
+];
+
+export function inferVepHint(concepto: string): VepHint | undefined {
+  for (const { pattern, taxSubcategory } of VEP_PATTERNS) {
+    if (pattern.test(concepto)) {
+      return {
+        isVep: true,
+        taxSubcategory,
+        isIncomeTaxDeductible: TAX_SUBCATEGORY_DEDUCTIBLE[taxSubcategory],
+      };
+    }
+  }
+  return undefined;
+}
 
 export function defaultBankAccountId(): string {
   const fromEnv = process.env.ACCOUNTING_BANK_ACCOUNT_NUMBER?.trim();
@@ -116,6 +147,8 @@ export function normalizeBankMovement(
       ? `Extracto bancario · ref ${referenciaBanco} · saldo ${saldo.toLocaleString("es-AR")}`
       : `Extracto bancario · ref ${referenciaBanco}`;
 
+  const vepHint = kind === "pago" ? inferVepHint(concepto) : undefined;
+
   return {
     fecha,
     importe,
@@ -125,6 +158,7 @@ export function normalizeBankMovement(
     bankReference,
     referenciaBanco,
     observaciones,
+    ...(vepHint ? { vepHint } : {}),
   };
 }
 

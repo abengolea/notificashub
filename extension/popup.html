@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>NotificasHub — Importador</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        width: 320px;
+        padding: 12px;
+        color: #1f2937;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+      section {
+        margin-bottom: 14px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      section:last-child {
+        border-bottom: none;
+      }
+      label {
+        display: block;
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 6px;
+      }
+      input,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 5px 6px;
+        font-size: 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        margin-top: 2px;
+      }
+      button {
+        margin-top: 8px;
+        width: 100%;
+        padding: 7px;
+        font-size: 12px;
+        font-weight: 600;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background: #059669;
+        color: white;
+      }
+      button.secondary {
+        background: #4f46e5;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+      }
+      .row > * {
+        flex: 1;
+      }
+      #log {
+        font-size: 11px;
+        white-space: pre-wrap;
+        background: #f9fafb;
+        border-radius: 6px;
+        padding: 6px;
+        max-height: 140px;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>NotificasHub — Importador contable</h1>
+
+    <section>
+      <strong style="font-size: 12px">Configuración</strong>
+      <label>URL del backend</label>
+      <input id="backendUrl" placeholder="http://localhost:3000" />
+      <label>Token de extensión</label>
+      <input id="extensionToken" type="password" placeholder="EXTENSION_API_TOKEN" />
+      <label>Entidad</label>
+      <select id="entityId">
+        <option value="notificas_srl">Notificas SRL</option>
+        <option value="adrian_bengolea">Adrián Bengolea</option>
+      </select>
+      <button id="saveConfig">Guardar</button>
+    </section>
+
+    <section>
+      <strong style="font-size: 12px">Página actual</strong>
+      <button id="scanPage" class="secondary">Escanear esta página</button>
+      <button id="confirmImport" disabled>Confirmar importación</button>
+    </section>
+
+    <section>
+      <strong style="font-size: 12px">CM05 (Ingresos Brutos)</strong>
+      <div class="row">
+        <div>
+          <label>Año</label>
+          <input id="cm05Year" type="number" />
+        </div>
+        <div>
+          <label>Mes</label>
+          <input id="cm05Month" type="number" min="1" max="12" />
+        </div>
+      </div>
+      <button id="downloadCm05" class="secondary">Descargar CM05 del mes</button>
+    </section>
+
+    <div id="log">Sin actividad.</div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

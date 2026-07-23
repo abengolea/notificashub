@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
-import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { extractPagoFiscalFromPdf } from "@/lib/accounting/pdf-ai-extract";
 import { resolvePagoForIvaExport, inferLegacyFiscalFields } from "@/lib/accounting/pago-legacy-infer";
@@ -14,6 +14,7 @@ type RepairBody = {
   pagoId?: string;
   year?: number;
   month?: number;
+  entity?: unknown;
   /** Aplicar inferencia legacy sin re-OCR */
   applyInferred?: boolean;
   /** Re-leer PDF con Gemini y fusionar */
@@ -27,10 +28,11 @@ function bounds(year: number, month: number): { start: Timestamp; end: Timestamp
 }
 
 async function repairOnePago(
+  pagosCollection: string,
   pagoId: string,
   opts: { applyInferred: boolean; reprocessPdf: boolean }
 ): Promise<{ id: string; ok: boolean; error?: string; audit?: ReturnType<typeof auditPagoItem> }> {
-  const ref = db.collection(ACCOUNTING_COLLECTIONS.pagos).doc(pagoId);
+  const ref = db.collection(pagosCollection).doc(pagoId);
   const snap = await ref.get();
   if (!snap.exists) return { id: pagoId, ok: false, error: "No encontrado" };
 
@@ -137,12 +139,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
+  const entity = resolveAccountingEntity(new URL(req.url).searchParams, body.entity);
   const applyInferred = body.applyInferred === true;
   const reprocessPdf = body.reprocessPdf === true;
+  const pagosCol = entity.collections.pagos;
 
   try {
     if (body.pagoId) {
-      const result = await repairOnePago(body.pagoId, { applyInferred, reprocessPdf });
+      const result = await repairOnePago(pagosCol, body.pagoId, { applyInferred, reprocessPdf });
       if (!result.ok) {
         return NextResponse.json({ error: result.error }, { status: result.error === "No encontrado" ? 404 : 422 });
       }
@@ -157,7 +161,7 @@ export async function POST(req: NextRequest) {
 
     const { start, end } = bounds(y!, m!);
     const snap = await db
-      .collection(ACCOUNTING_COLLECTIONS.pagos)
+      .collection(pagosCol)
       .where("fecha", ">=", start)
       .where("fecha", "<=", end)
       .limit(500)
@@ -176,7 +180,7 @@ export async function POST(req: NextRequest) {
 
       if (!needsRepair) continue;
 
-      const r = await repairOnePago(doc.id, {
+      const r = await repairOnePago(pagosCol, doc.id, {
         applyInferred,
         reprocessPdf: reprocessPdf && Boolean(raw.pdfStoragePath),
       });

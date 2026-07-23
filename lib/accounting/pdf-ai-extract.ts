@@ -5,7 +5,13 @@ import {
   pdfBase64Payload,
 } from "@/lib/ai/google-gemini";
 import type { RawBankMovement } from "@/lib/accounting/bank-extract";
-import { medioPagoSchema, tipoComprobanteSchema, invoiceTypeSchema } from "@/lib/accounting/schemas";
+import {
+  medioPagoSchema,
+  tipoComprobanteSchema,
+  invoiceTypeSchema,
+  bienNaturalezaSchema,
+  bienTipoSchema,
+} from "@/lib/accounting/schemas";
 import { cuitsMatch, NOTIFICAS_CUIT, normalizeCuitDigits } from "@/lib/accounting/pago-fiscal";
 
 const FACTURA_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
@@ -74,6 +80,15 @@ const PAGO_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdo
   "proveedor": string,
   "medio": "transferencia"|"efectivo"|"cheque"|"tarjeta"|"otro",
   "observaciones": string
+}`;
+
+const BIEN_JSON_INSTRUCTION = `Respondé SOLO un objeto JSON válido (sin markdown) con exactamente estas claves y tipos:
+{
+  "naturaleza": "activo"|"pasivo",
+  "tipo": "inmueble"|"rodado"|"cuenta_bancaria"|"inversion"|"participacion_societaria"|"cripto"|"otro",
+  "descripcion": string (breve, ej. dirección del inmueble o marca/modelo del rodado),
+  "valuacionFiscal": number (el valor a declarar: valuación fiscal/impositiva si es inmueble o rodado, saldo si es cuenta/inversión),
+  "notes": string (dato relevante que no entra en los otros campos, ej. partida inmobiliaria, dominio, banco)
 }`;
 
 function normalizeCuitOptional(s: string): string | undefined {
@@ -353,6 +368,76 @@ function parseMovimientosArray(raw: unknown): RawBankMovement[] {
     });
   }
   return out;
+}
+
+function coerceBienNaturaleza(v: unknown): "activo" | "pasivo" {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  const parsed = bienNaturalezaSchema.safeParse(s || "activo");
+  return parsed.success ? parsed.data : "activo";
+}
+
+function coerceBienTipo(v: unknown): string {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  const parsed = bienTipoSchema.safeParse(s || "otro");
+  return parsed.success ? parsed.data : "otro";
+}
+
+export type BienExtract = {
+  naturaleza: "activo" | "pasivo";
+  tipo: string;
+  descripcion: string;
+  valuacionFiscal: number;
+  notes?: string;
+};
+
+/** Extrae datos de un bien/deuda (Bienes Personales) desde un PDF: título, cédula, resumen de cuenta/plazo fijo, tasación, etc. */
+export async function extractBienFromPdf(params: { pdfBase64: string; filename: string }): Promise<BienExtract> {
+  const model = getGenerativeModel(accountingPdfModel());
+  const pdfData = pdfBase64Payload(params.pdfBase64);
+
+  const prompt =
+    "Sos un asistente contable para Argentina, ayudando a armar el detalle de patrimonio para la DDJJ de Bienes Personales. " +
+    "Analizá el PDF adjunto (puede ser: título de propiedad o boleta de impuesto inmobiliario con valuación fiscal, " +
+    "cédula verde/título de un rodado, resumen de cuenta bancaria o plazo fijo, comprobante de inversión, o un documento de deuda/préstamo). " +
+    "Identificá si es un activo (bien) o un pasivo (deuda), su tipo, una descripción breve, y el importe a declarar " +
+    "(valuación fiscal/impositiva para inmuebles y rodados; saldo al cierre para cuentas/inversiones/deudas). " +
+    "Si el PDF no trae valuación fiscal para un inmueble, usá 0 y anotalo en notes para que el usuario la complete a mano. " +
+    "Importes numéricos con punto decimal, sin símbolo $.\n\n" +
+    BIEN_JSON_INSTRUCTION;
+
+  const result = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfData,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const rawText = result.response.text()?.trim();
+  if (!rawText) {
+    throw new Error("El modelo no devolvió datos.");
+  }
+  const raw = parseModelJsonObject(rawText);
+  return {
+    naturaleza: coerceBienNaturaleza(raw.naturaleza),
+    tipo: coerceBienTipo(raw.tipo),
+    descripcion: String(raw.descripcion ?? "").trim(),
+    valuacionFiscal: Number(raw.valuacionFiscal ?? 0),
+    notes: String(raw.notes ?? "").trim() || undefined,
+  };
 }
 
 export async function extractBankExtractFromPdf(params: { pdfBase64: string; filename: string }) {

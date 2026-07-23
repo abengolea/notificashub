@@ -200,6 +200,71 @@ export async function feCompUltimoAutorizado(
   };
 }
 
+export type FePtoVenta = {
+  nro: number;
+  emisionTipo: string;
+  bloqueado: boolean;
+  fchBaja?: string;
+};
+
+/** FEParamGetPtosVenta — puntos de venta registrados en WSFE para el CUIT. */
+export async function feParamGetPtosVenta(
+  env: AfipIntegrationEnv,
+  ta: WsaaCredentials,
+): Promise<FeWsfeResult<FePtoVenta[]>> {
+  debugTA(ta.token);
+  const esc = escapeXmlText;
+  const soap = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">
+  <soap:Body>
+    <ar:FEParamGetPtosVenta>
+      <ar:Auth>
+        <ar:Token>${esc(ta.token)}</ar:Token>
+        <ar:Sign>${esc(ta.sign)}</ar:Sign>
+        <ar:Cuit>${env.cuitNumeric}</ar:Cuit>
+      </ar:Auth>
+    </ar:FEParamGetPtosVenta>
+  </soap:Body>
+</soap:Envelope>`;
+
+  const url = afipWsfeUrl(env.production);
+  let text: string;
+  try {
+    text = await postSoap(url, "http://ar.gov.afip.dif.FEV1/FEParamGetPtosVenta", soap);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, errors: [{ code: "FETCH", msg }] };
+  }
+
+  const parsed = parser.parse(text) as Record<string, unknown>;
+  const fault = findDeep(parsed, "Fault");
+  if (fault !== undefined) {
+    return { ok: false, errors: [{ code: "SOAP", msg: JSON.stringify(fault).slice(0, 400) }] };
+  }
+  const errs = extractErrors(parsed);
+  if (errs.length > 0) return { ok: false, errors: errs };
+
+  const resultGet = findDeep(parsed, "ResultGet");
+  const listRaw = findDeep(resultGet ?? parsed, "PtoVenta");
+  const items = Array.isArray(listRaw) ? listRaw : listRaw != null ? [listRaw] : [];
+  const out: FePtoVenta[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const nro = typeof o.Nro === "number" ? o.Nro : parseInt(String(o.Nro ?? ""), 10);
+    if (!Number.isFinite(nro) || nro < 1) continue;
+    const bloqueado = String(o.Bloqueado ?? "").toUpperCase() === "S";
+    const fchBaja = o.FchBaja != null && String(o.FchBaja).trim() ? String(o.FchBaja) : undefined;
+    out.push({
+      nro,
+      emisionTipo: String(o.EmisionTipo ?? "").trim(),
+      bloqueado,
+      fchBaja,
+    });
+  }
+  return { ok: true, data: out };
+}
+
 export type FeCaeResult = {
   cae: string;
   caeFchVto: string;
@@ -325,6 +390,48 @@ export async function feCAESolicitar(
   };
 }
 
+export type FeCompConsultado = FeCaeResult & {
+  resultado?: string;
+  impTotal?: number;
+  cbteTipo: number;
+  ptoVta: number;
+  /** Fecha emisión YYYY-MM-DD si AFIP la devolvió. */
+  fechaIso?: string;
+  impNeto?: number;
+  impIva?: number;
+  impOpEx?: number;
+  impTotConc?: number;
+  impTrib?: number;
+  docTipo?: number;
+  docNro?: string;
+};
+
+function numDeep(parsed: Record<string, unknown>, key: string): number | undefined {
+  const raw = findDeep(parsed, key);
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function afipFechaToIso(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  // Número AFIP yyyymmdd (ej. 20260713) — evitar notación científica
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const s = String(Math.trunc(raw));
+    if (s.length === 8) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  }
+  const s = String(raw).replace(/\D/g, "");
+  if (s.length !== 8) return undefined;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+/** Extrae el nodo ResultGet de FECompConsultar (si está). */
+function resultGetNode(parsed: Record<string, unknown>): Record<string, unknown> {
+  const rg = findDeep(parsed, "ResultGet");
+  if (rg && typeof rg === "object" && !Array.isArray(rg)) return rg as Record<string, unknown>;
+  return parsed;
+}
+
 /** FECompConsultar — recupera datos de un comprobante ya autorizado. */
 export async function feCompConsultar(
   env: AfipIntegrationEnv,
@@ -332,7 +439,7 @@ export async function feCompConsultar(
   ptoVta: number,
   cbteTipo: number,
   cbteNro: number,
-): Promise<FeWsfeResult<FeCaeResult & { resultado?: string; impTotal?: number }>> {
+): Promise<FeWsfeResult<FeCompConsultado>> {
   debugTA(ta.token);
   const esc = escapeXmlText;
   const soap = `<?xml version="1.0" encoding="utf-8"?>
@@ -373,24 +480,43 @@ export async function feCompConsultar(
     return { ok: false, errors: errs };
   }
 
-  const cae = String(findDeep(parsed, "CodAutorizacion") ?? findDeep(parsed, "CAE") ?? "");
-  if (!cae) {
+  const node = resultGetNode(parsed);
+  const cae = String(
+    findDeep(node, "CodAutorizacion") ?? findDeep(node, "CAE") ?? findDeep(parsed, "CodAutorizacion") ?? ""
+  );
+  const fechaIso =
+    afipFechaToIso(findDeep(node, "CbteFch")) ??
+    afipFechaToIso(findDeep(parsed, "CbteFch")) ??
+    afipFechaToIso(findDeep(node, "FchProceso"));
+  const impTotal = numDeep(node, "ImpTotal") ?? numDeep(parsed, "ImpTotal");
+
+  // Algunos entornos no traen CAE en el mismo nodo; si hay fecha/importe, igual es válido.
+  if (!cae && !fechaIso && impTotal == null) {
     return { ok: false, errors: [], rawHint: text.slice(0, 900) };
   }
 
-  const caeFchVto = String(findDeep(parsed, "FchVto") ?? findDeep(parsed, "CAEFchVto") ?? "");
-  const impTotalRaw = findDeep(parsed, "ImpTotal");
-  const impTotal =
-    typeof impTotalRaw === "number" ? impTotalRaw : Number(String(impTotalRaw ?? "NaN"));
+  const caeFchVto = String(findDeep(node, "FchVto") ?? findDeep(node, "CAEFchVto") ?? "");
+  const docTipo = numDeep(node, "DocTipo") ?? numDeep(parsed, "DocTipo");
+  const docNroRaw = findDeep(node, "DocNro") ?? findDeep(parsed, "DocNro");
 
   return {
     ok: true,
     data: {
-      cae,
+      cae: cae || `SYNC-${ptoVta}-${cbteTipo}-${cbteNro}`,
       caeFchVto,
       voucherNumber: cbteNro,
-      resultado: String(findDeep(parsed, "Resultado") ?? ""),
-      impTotal: Number.isFinite(impTotal) ? impTotal : undefined,
+      resultado: String(findDeep(node, "Resultado") ?? findDeep(parsed, "Resultado") ?? ""),
+      impTotal,
+      cbteTipo,
+      ptoVta,
+      fechaIso,
+      impNeto: numDeep(node, "ImpNeto") ?? numDeep(parsed, "ImpNeto"),
+      impIva: numDeep(node, "ImpIVA") ?? numDeep(parsed, "ImpIVA"),
+      impOpEx: numDeep(node, "ImpOpEx") ?? numDeep(parsed, "ImpOpEx"),
+      impTotConc: numDeep(node, "ImpTotConc") ?? numDeep(parsed, "ImpTotConc"),
+      impTrib: numDeep(node, "ImpTrib") ?? numDeep(parsed, "ImpTrib"),
+      docTipo: docTipo != null ? Math.trunc(docTipo) : undefined,
+      docNro: docNroRaw != null ? String(docNroRaw).replace(/\D/g, "") : undefined,
     },
   };
 }

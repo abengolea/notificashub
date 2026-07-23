@@ -7,6 +7,9 @@ import {
   suggestVat21FromTotal,
   NOTIFICAS_CUIT,
   NOTIFICAS_RAZON_SOCIAL,
+  TAX_SUBCATEGORY_LABELS,
+  TAX_SUBCATEGORY_DEDUCTIBLE,
+  TAX_SUBCATEGORIES,
 } from "@/lib/accounting/pago-fiscal";
 
 export type PagoFormState = {
@@ -35,6 +38,7 @@ export type PagoFormState = {
   grossIncomePerceptionAmount: string;
   otherTaxesAmount: string;
   accountingCategory: string;
+  taxSubcategory: string;
   paidBy: string;
   isVatComputable: boolean;
   isIncomeTaxDeductible: boolean;
@@ -70,6 +74,7 @@ export function emptyPagoForm(): PagoFormState {
     grossIncomePerceptionAmount: "",
     otherTaxesAmount: "",
     accountingCategory: "",
+    taxSubcategory: "",
     paidBy: "",
     isVatComputable: false,
     isIncomeTaxDeductible: false,
@@ -105,6 +110,7 @@ export function pagoFormFromRecord(row: Record<string, unknown>): PagoFormState 
     grossIncomePerceptionAmount: String(row.grossIncomePerceptionAmount ?? ""),
     otherTaxesAmount: String(row.otherTaxesAmount ?? ""),
     accountingCategory: String(row.accountingCategory ?? ""),
+    taxSubcategory: String(row.taxSubcategory ?? ""),
     paidBy: String(row.paidBy ?? ""),
     isVatComputable: row.isVatComputable === true,
     isIncomeTaxDeductible: row.isIncomeTaxDeductible === true,
@@ -163,8 +169,15 @@ export function PagoForm(props: {
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
   receiverCuitDetected?: string | null;
+  companyLabel?: string;
+  companyCuit?: string;
 }) {
   const { form, setForm, editId, saving, onSubmit, onCancel, receiverCuitDetected } = props;
+  const companyLabel = props.companyLabel ?? NOTIFICAS_RAZON_SOCIAL;
+  const companyCuit = props.companyCuit ?? NOTIFICAS_CUIT;
+  const issuedToCompanyOption = companyCuit.trim()
+    ? `Sí (${companyLabel} — CUIT ${companyCuit})`
+    : `Sí (${companyLabel})`;
   const showVatFields = form.invoiceType === "factura_a";
 
   const alerts = useMemo(() => {
@@ -232,7 +245,14 @@ export function PagoForm(props: {
         <FieldLabel label="Categoría contable">
           <select
             value={form.accountingCategory}
-            onChange={(e) => setForm((s) => ({ ...s, accountingCategory: e.target.value }))}
+            onChange={(e) => {
+              const cat = e.target.value;
+              setForm((s) => ({
+                ...s,
+                accountingCategory: cat,
+                taxSubcategory: cat !== "impuestos" ? "" : s.taxSubcategory,
+              }));
+            }}
             className={inputCls}
           >
             <option value="">— Seleccionar —</option>
@@ -248,6 +268,33 @@ export function PagoForm(props: {
             <option value="otro">Otro</option>
           </select>
         </FieldLabel>
+        {form.accountingCategory === "impuestos" ? (
+          <FieldLabel label="Tipo de impuesto">
+            <select
+              value={form.taxSubcategory}
+              onChange={(e) => {
+                const sub = e.target.value as keyof typeof TAX_SUBCATEGORY_DEDUCTIBLE | "";
+                setForm((s) => ({
+                  ...s,
+                  taxSubcategory: sub,
+                  isIncomeTaxDeductible: sub ? TAX_SUBCATEGORY_DEDUCTIBLE[sub as keyof typeof TAX_SUBCATEGORY_DEDUCTIBLE] : s.isIncomeTaxDeductible,
+                  invoiceType: !s.invoiceType && sub ? "vep" : s.invoiceType,
+                  supplierName: !s.supplierName && sub ? "AFIP - ARCA" : s.supplierName,
+                  proveedor: !s.proveedor && sub ? "AFIP - ARCA" : s.proveedor,
+                }));
+              }}
+              className={inputCls}
+            >
+              <option value="">— Seleccionar —</option>
+              {TAX_SUBCATEGORIES.map((sc) => (
+                <option key={sc} value={sc}>
+                  {TAX_SUBCATEGORY_LABELS[sc]}
+                  {TAX_SUBCATEGORY_DEDUCTIBLE[sc] ? " ✓ deducible" : ""}
+                </option>
+              ))}
+            </select>
+          </FieldLabel>
+        ) : null}
       </FormSection>
 
       <FormSection title="Datos del comprobante">
@@ -271,6 +318,7 @@ export function PagoForm(props: {
             <option value="factura_c">Factura C</option>
             <option value="ticket">Ticket</option>
             <option value="recibo">Recibo</option>
+            <option value="vep">VEP (pago de impuesto)</option>
             <option value="sin_comprobante">Sin comprobante</option>
             <option value="otro">Otro</option>
           </select>
@@ -329,7 +377,7 @@ export function PagoForm(props: {
             className={inputCls}
           />
         </FieldLabel>
-        <FieldLabel label="Emitido a nombre de NOTIFICAS SRL">
+        <FieldLabel label={`Emitido a nombre de ${companyLabel}`}>
           <select
             value={form.issuedToCompany === null ? "" : form.issuedToCompany ? "si" : "no"}
             onChange={(e) =>
@@ -341,7 +389,7 @@ export function PagoForm(props: {
             className={inputCls}
           >
             <option value="">— Sin verificar —</option>
-            <option value="si">Sí ({NOTIFICAS_RAZON_SOCIAL} — CUIT {NOTIFICAS_CUIT})</option>
+            <option value="si">{issuedToCompanyOption}</option>
             <option value="no">No / otro receptor</option>
           </select>
         </FieldLabel>
@@ -587,6 +635,7 @@ export function buildPagoSubmitBody(form: PagoFormState): Record<string, unknown
     grossIncomePerceptionAmount: num(form.grossIncomePerceptionAmount),
     otherTaxesAmount: num(form.otherTaxesAmount),
     accountingCategory: form.accountingCategory || null,
+    taxSubcategory: form.accountingCategory === "impuestos" ? (form.taxSubcategory || null) : null,
     paymentMethod: form.medio || undefined,
     paidBy: form.paidBy || null,
     isVatComputable: form.isVatComputable,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDashboard } from "@/lib/require-dashboard";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { loadPeriodExportData, validateArcaExport } from "@/lib/arca-export/period-export";
 
 /** GET /api/accounting/arca-export/validate?year=&month= */
@@ -8,6 +9,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
+  const entity = resolveAccountingEntity(searchParams);
   const y = parseInt(searchParams.get("year") ?? "", 10);
   const m = parseInt(searchParams.get("month") ?? "", 10);
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) {
@@ -15,7 +17,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const data = await loadPeriodExportData(y, m);
+    const data = await loadPeriodExportData(y, m, entity.id);
     const validation = validateArcaExport(data);
     return NextResponse.json({
       ...validation,

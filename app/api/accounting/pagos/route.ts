@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
-import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { pagoBodySchema } from "@/lib/accounting/schemas";
 import { pagoBodyToFirestore, pagoDocToRecord, pagoFirestoreWithTimestamps } from "@/lib/accounting/pago-persist";
@@ -23,8 +23,10 @@ export async function GET(req: NextRequest) {
   const denied = await requireDashboard(req);
   if (denied) return denied;
 
-  const col = db.collection(ACCOUNTING_COLLECTIONS.pagos);
-  const b = bounds(new URL(req.url).searchParams);
+  const searchParams = new URL(req.url).searchParams;
+  const entity = resolveAccountingEntity(searchParams);
+  const col = db.collection(entity.collections.pagos);
+  const b = bounds(searchParams);
 
   try {
     const snap =
@@ -57,6 +59,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    (body as { entity?: unknown }).entity
+  );
+
   const parsed = pagoBodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validación fallida", details: parsed.error.flatten() }, { status: 400 });
@@ -70,8 +77,8 @@ export async function POST(req: NextRequest) {
     const paymentTs = Timestamp.fromDate(dateOnlyToUtcMidday(paymentDate));
     const doc = pagoFirestoreWithTimestamps(fsRow, paymentTs);
 
-    const ref = await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
-      empresa: "notificas_srl",
+    const ref = await db.collection(entity.collections.pagos).add({
+      empresa: entity.empresa,
       ...doc,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

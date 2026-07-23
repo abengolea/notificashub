@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { AccountingEntityId } from "@/lib/accounting/entities";
 import { TabPageIntro } from "./contabilidad-shell";
 
 type AuditGasto = {
@@ -63,8 +64,9 @@ export function AuditoriaIvaTab(props: {
   year: string;
   month: string;
   qh: () => string;
+  entityId: AccountingEntityId;
 }) {
-  const { authHeader, year, month, qh } = props;
+  const { authHeader, year, month, qh, entityId } = props;
   const [report, setReport] = useState<AuditReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -99,6 +101,7 @@ export function AuditoriaIvaTab(props: {
         body: JSON.stringify({
           year: parseInt(year, 10),
           month: parseInt(month, 10),
+          entity: entityId,
           applyInferred: opts.applyInferred ?? true,
           reprocessPdf: opts.reprocessPdf ?? false,
           pagoId: opts.pagoId,
@@ -122,7 +125,7 @@ export function AuditoriaIvaTab(props: {
     <div className="space-y-6">
       <TabPageIntro
         title="Auditoría IVA Compras"
-        description="Diagnóstico de por qué cada gasto entra o no al Libro IVA Compras / export ARCA."
+        description="Mirás qué gastos entran (o no) al Libro IVA Compras al exportar en Declarar."
       />
 
       <div className="flex flex-wrap gap-3">

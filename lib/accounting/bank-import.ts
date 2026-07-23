@@ -98,10 +98,15 @@ export async function persistBankMovements(params: {
         await db.collection(ACCOUNTING_COLLECTIONS.cobros).add(base);
         importedCobros += 1;
       } else {
+        const vep = m.vepHint;
         await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
           ...base,
-          proveedor: null,
+          proveedor: vep ? "AFIP - ARCA" : null,
+          invoiceType: vep ? "vep" : null,
+          accountingCategory: vep ? "impuestos" : null,
+          taxSubcategory: vep?.taxSubcategory ?? null,
           isVatComputable: false,
+          isIncomeTaxDeductible: vep?.isIncomeTaxDeductible ?? false,
           issuedToCompany: null,
           netTaxedAmount: 0,
           vat21Amount: 0,

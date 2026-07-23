@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "NotificasHub — Importador contable",
+  "version": "0.1.0",
+  "description": "Lee Mis Comprobantes de ARCA, el extracto de Banco Macro y ayuda a subir el CM05 a SIFERE, mandando los datos directo a NotificasHub.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "NotificasHub — Importador"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "activeTab", "scripting", "downloads"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://*.web.app/*",
+    "https://*.firebaseapp.com/*",
+    "https://*.hosted.app/*",
+    "https://fes.afip.gob.ar/*",
+    "https://*.sifereweb.gov.ar/*",
+    "https://*.macro.com.ar/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://fes.afip.gob.ar/mcmp/*"],
+      "js": ["content-scripts/common.js", "content-scripts/mis-comprobantes.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.macro.com.ar/*"],
+      "js": ["content-scripts/common.js", "content-scripts/banco-macro.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.sifereweb.gov.ar/*"],
+      "js": ["content-scripts/common.js", "content-scripts/sifere-cm05.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

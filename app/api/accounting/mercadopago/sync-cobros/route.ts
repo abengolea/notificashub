@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
-import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { ACCOUNTING_COLLECTIONS, resolveAccountingEntity } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import {
   cobroInputFromMpPaymentAndFactura,
@@ -29,6 +29,25 @@ export async function POST(req: NextRequest) {
   const denied = await requireDashboard(req);
   if (denied) return denied;
 
+  let body: unknown = {};
+  try {
+    const raw = await req.text();
+    if (raw.trim()) body = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    (body as { entity?: unknown }).entity
+  );
+  if (!entity.integrations.mercadoPago) {
+    return NextResponse.json(
+      { error: "Sincronización Mercado Pago solo disponible para Notificas SRL" },
+      { status: 400 }
+    );
+  }
+
   const token = process.env.MERCADOPAGO_ACCESS_TOKEN?.trim();
   if (!token) {
     return NextResponse.json(
@@ -38,14 +57,6 @@ export async function POST(req: NextRequest) {
       },
       { status: 503 }
     );
-  }
-
-  let body: unknown = {};
-  try {
-    const raw = await req.text();
-    if (raw.trim()) body = JSON.parse(raw);
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
   const b = body as { begin?: string; end?: string };

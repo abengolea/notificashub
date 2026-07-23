@@ -1,10 +1,26 @@
-/** Empresa objetivo para DDJJ orientativas (IVA / Ganancias). */
-export const ACCOUNTING_COMPANY_NAME = "Notificas SRL";
+import {
+  ACCOUNTING_ENTITIES,
+  DEFAULT_ACCOUNTING_ENTITY_ID,
+  type AccountingCollections,
+} from "@/lib/accounting/entities";
 
-export const ACCOUNTING_COLLECTIONS = {
-  facturas: "accounting_notificas_srl_facturas",
-  cobros: "accounting_notificas_srl_cobros",
-  pagos: "accounting_notificas_srl_pagos",
-  /** Log de mails de recordatorio vencimientos (anti-spam por período) */
-  taxReminderSent: "accounting_notificas_srl_tax_reminder_sent",
-} as const;
+/** @deprecated Prefer `getAccountingEntity(id).displayName` — default Notificas. */
+export const ACCOUNTING_COMPANY_NAME = ACCOUNTING_ENTITIES[DEFAULT_ACCOUNTING_ENTITY_ID].displayName;
+
+/** Colecciones de Notificas SRL (compat). Prefer `getAccountingEntity(id).collections`. */
+export const ACCOUNTING_COLLECTIONS: AccountingCollections =
+  ACCOUNTING_ENTITIES[DEFAULT_ACCOUNTING_ENTITY_ID].collections;
+
+export {
+  ACCOUNTING_ENTITIES,
+  ACCOUNTING_ENTITY_IDS,
+  ACCOUNTING_ENTITY_OPTIONS,
+  DEFAULT_ACCOUNTING_ENTITY_ID,
+  getAccountingEntity,
+  isAccountingEntityId,
+  parseAccountingEntityId,
+  resolveAccountingEntity,
+  type AccountingCollections,
+  type AccountingEntity,
+  type AccountingEntityId,
+} from "@/lib/accounting/entities";

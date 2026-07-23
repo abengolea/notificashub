@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
 import { requireDashboard } from "@/lib/require-dashboard";
-import { ACCOUNTING_COMPANY_NAME, ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { buildIvaAuditReport, pagosComprasForPeriodWithFallback } from "@/lib/accounting/iva-audit";
 
 function bounds(year: number, month: number): { start: Timestamp; end: Timestamp } {
@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
+  const entity = resolveAccountingEntity(searchParams);
   const y = parseInt(searchParams.get("year") ?? "", 10);
   const m = parseInt(searchParams.get("month") ?? "", 10);
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) {
@@ -28,19 +29,19 @@ export async function GET(req: NextRequest) {
   try {
     const [factSnap, cobSnap, pagSnap] = await Promise.all([
       db
-        .collection(ACCOUNTING_COLLECTIONS.facturas)
+        .collection(entity.collections.facturas)
         .where("fecha", ">=", start)
         .where("fecha", "<=", end)
         .limit(5000)
         .get(),
       db
-        .collection(ACCOUNTING_COLLECTIONS.cobros)
+        .collection(entity.collections.cobros)
         .where("fecha", ">=", start)
         .where("fecha", "<=", end)
         .limit(5000)
         .get(),
       db
-        .collection(ACCOUNTING_COLLECTIONS.pagos)
+        .collection(entity.collections.pagos)
         .where("fecha", ">=", start)
         .where("fecha", "<=", end)
         .limit(5000)
@@ -93,7 +94,7 @@ export async function GET(req: NextRequest) {
     const resultadoCajaOrientativo = cobrosSum - pagosSum;
 
     return NextResponse.json({
-      empresaNombre: ACCOUNTING_COMPANY_NAME,
+      empresaNombre: entity.displayName,
       periodo: { year: y, month: m },
       libroFacturasCargadas: factSnap.docs.length,
       cobrosRegistrados: cobSnap.docs.length,

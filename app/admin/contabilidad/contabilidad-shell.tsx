@@ -9,10 +9,12 @@ export function ContabTabBar(props: {
   tab: TabId;
   setTab: (t: TabId) => void;
   counts: Partial<Record<TabId, number>>;
+  isIndividual: boolean;
 }) {
-  const { tab, setTab, counts } = props;
-  const operacion = CONTAB_TABS.filter((t) => t.group === "operacion");
-  const impuestos = CONTAB_TABS.filter((t) => t.group === "impuestos");
+  const { tab, setTab, counts, isIndividual } = props;
+  const visible = CONTAB_TABS.filter((t) => !t.requiresIndividual || isIndividual);
+  const operacion = visible.filter((t) => t.group === "operacion");
+  const impuestos = visible.filter((t) => t.group === "impuestos");
 
   const renderBtn = (t: (typeof CONTAB_TABS)[number]) => {
     const n = counts[t.id];
@@ -49,11 +51,12 @@ export function ContabTabBar(props: {
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 items-center">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-400 pr-1 shrink-0">Mes</span>
         {operacion.map(renderBtn)}
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 items-center">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-400 pr-1 shrink-0">Impuestos</span>
+        <span className="text-[10px] uppercase tracking-wide text-zinc-400 pr-1 shrink-0">ARCA</span>
         {impuestos.map(renderBtn)}
       </div>
     </div>

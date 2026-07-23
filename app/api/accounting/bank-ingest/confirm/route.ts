@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { NormalizedBankMovement } from "@/lib/accounting/bank-extract";
 import { persistBankMovements } from "@/lib/accounting/bank-import";
-import { medioPagoSchema } from "@/lib/accounting/schemas";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
+import { medioPagoSchema, taxSubcategorySchema } from "@/lib/accounting/schemas";
 import { requireDashboard } from "@/lib/require-dashboard";
+
+const vepHintSchema = z.object({
+  isVep: z.literal(true),
+  taxSubcategory: taxSubcategorySchema,
+  isIncomeTaxDeductible: z.boolean(),
+});
 
 const movementSchema = z.object({
   bankReference: z.string().min(8).max(128),
@@ -15,10 +22,12 @@ const movementSchema = z.object({
   referenciaBanco: z.string().max(64).optional(),
   observaciones: z.string().max(2000).optional(),
   selected: z.boolean().optional(),
+  vepHint: vepHintSchema.nullable().optional(),
 });
 
 const bodySchema = z.object({
   pdfStoragePath: z.string().max(512).optional(),
+  entity: z.string().optional(),
   movements: z.array(movementSchema).min(1).max(200),
 });
 
@@ -31,6 +40,17 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    (body as { entity?: unknown }).entity
+  );
+  if (!entity.integrations.bankIngest) {
+    return NextResponse.json(
+      { error: "Importación bancaria solo disponible para Notificas SRL" },
+      { status: 400 }
+    );
   }
 
   const parsed = bodySchema.safeParse(body);
@@ -53,6 +73,7 @@ export async function POST(req: NextRequest) {
       medio: row.medio ?? "transferencia",
       referenciaBanco: row.referenciaBanco ?? "sin-ref",
       observaciones: row.observaciones,
+      ...(row.vepHint ? { vepHint: row.vepHint } : {}),
     });
   }
 

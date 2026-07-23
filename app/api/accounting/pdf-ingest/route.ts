@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase-admin";
-import { ACCOUNTING_COLLECTIONS } from "@/lib/accounting/constants";
+import { resolveAccountingEntity } from "@/lib/accounting/constants";
 import { dateOnlyToUtcMidday } from "@/lib/accounting/dates";
 import { extractFacturaFromPdf, extractPagoFiscalFromPdf } from "@/lib/accounting/pdf-ai-extract";
 import { facturaBodySchema, pagoBodySchema } from "@/lib/accounting/schemas";
@@ -40,6 +40,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "FormData inválido" }, { status: 400 });
   }
 
+  const entity = resolveAccountingEntity(
+    new URL(req.url).searchParams,
+    form.get("entity")
+  );
+
   const tipo = String(form.get("tipo") ?? "").trim().toLowerCase();
   if (tipo !== "factura" && tipo !== "pago") {
     return NextResponse.json({ error: 'Campo "tipo" debe ser factura o pago' }, { status: 400 });
@@ -77,7 +82,11 @@ export async function POST(req: NextRequest) {
 
   let storagePath = "";
   try {
-    const up = await uploadAccountingPdf({ buffer: buf, originalName });
+    const up = await uploadAccountingPdf({
+      buffer: buf,
+      originalName,
+      storagePrefix: entity.storagePrefix,
+    });
     storagePath = up.storagePath;
   } catch (e) {
     console.error("[accounting/pdf-ingest] Storage:", e);
@@ -126,8 +135,8 @@ export async function POST(req: NextRequest) {
         .filter(Boolean)
         .join("\n");
 
-      const ref = await db.collection(ACCOUNTING_COLLECTIONS.facturas).add({
-        empresa: "notificas_srl",
+      const ref = await db.collection(entity.collections.facturas).add({
+        empresa: entity.empresa,
         tipo: b.tipo,
         numero: b.numero,
         puntoVenta: b.puntoVenta ?? null,
@@ -221,8 +230,8 @@ export async function POST(req: NextRequest) {
 
     const row = parsed.data;
 
-    const ref = await db.collection(ACCOUNTING_COLLECTIONS.pagos).add({
-      empresa: "notificas_srl",
+    const ref = await db.collection(entity.collections.pagos).add({
+      empresa: entity.empresa,
       fecha: Timestamp.fromDate(dateOnlyToUtcMidday(row.paymentDate ?? row.fecha)),
       importe: row.totalAmount ?? row.importe,
       concepto: row.concepto,
